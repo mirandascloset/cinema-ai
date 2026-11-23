@@ -54,6 +54,30 @@ export function storeSet(key: string, value: unknown): void {
   localStorage.setItem("ca." + key, JSON.stringify(value));
 }
 
+/** Save gallery results via Web Share or download. */
+export async function saveResults(items: Array<{ id: string; video?: boolean }>): Promise<void> {
+  const files = await Promise.all(
+    items.map(async (it) => {
+      const video = !!it.video;
+      const blob = await (await fetch(`/api/output/${it.id}${video ? ".mp4" : ""}`)).blob();
+      return new File([blob], `cinema-ai-${it.id}.${video ? "mp4" : "png"}`, {
+        type: video ? "video/mp4" : "image/png",
+      });
+    }),
+  );
+  if (navigator.canShare && navigator.canShare({ files })) {
+    await navigator.share({ files });
+    return;
+  }
+  for (const file of files) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(file);
+    a.download = file.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+}
+
 export function fmtTime(s: number): string {
   return s < 90 ? `${Math.max(1, Math.round(s))}s` : `${Math.round(s / 60)} min`;
 }

@@ -55,3 +55,15 @@ async def pc_import(request: Request):
 async def pc_import_video(request: Request):
     data = await request.json()
     return d.pc_import_video(str(data.get("path") or ""))
+
+
+@router.post("/api/pc/mkdir")
+async def pc_mkdir(request: Request):
+    data = await request.json()
+    return studio.pc_mkdir(str(data.get("dir") or ""), str(data.get("name") or ""))
+
+
+@router.post("/api/save")
+async def api_save(request: Request):
+    data = await request.json()
+    return d.save_outputs_to_pc(data.get("ids") or [], str(data.get("dir") or ""))
