@@ -48,6 +48,7 @@ export type SceneItem = {
   h3_steps?: number;
   sound?: boolean;
   use_ref_audio?: boolean;
+  preview_prompt?: string;
 };
 
 export type GalleryItem = {

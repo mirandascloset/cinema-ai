@@ -41,6 +41,12 @@ export function CinemaView({
 
   const sceneId = settings.selectedSceneId;
   const usingScene = !!sceneId;
+  const sceneNote = sceneId ? settings.scenePromptNotes[sceneId] || "" : "";
+
+  function setSceneNote(text: string) {
+    if (!sceneId) return;
+    updateSettings({ scenePromptNotes: { ...settings.scenePromptNotes, [sceneId]: text } });
+  }
 
   const loadScenes = useCallback(async () => {
     try {
@@ -127,9 +133,23 @@ export function CinemaView({
         h3Steps: settings.h3Steps,
         sound: settings.videoSound,
         useRefAudio: settings.useRefAudio,
+        ...(usingScene && sceneNote.trim()
+          ? { scenePromptNote: sceneNote.trim() }
+          : !usingScene && settings.cinemaPromptNote.trim()
+            ? { cinemaPromptNote: settings.cinemaPromptNote.trim() }
+            : {}),
       });
       onJob(job);
-      onToast(usingScene ? "Using saved captions — generating…" : "Studying the reference, then generating…");
+      const hasNote = usingScene ? !!sceneNote.trim() : !!settings.cinemaPromptNote.trim();
+      onToast(
+        usingScene
+          ? hasNote
+            ? "Updating captions for your photo, then generating…"
+            : "Using saved captions — generating…"
+          : hasNote
+            ? "Studying the reference, matching your photo, then generating…"
+            : "Studying the reference, then generating…",
+      );
       const final = await pollJob(job.id, (tick) => onJob(tick));
       onJob(final);
       if (final.status === "done") {
@@ -203,9 +223,6 @@ export function CinemaView({
               </button>
             </div>
           </div>
-          <p className="hint dim">
-            <b>{activeScene.name}</b> — saved captions, LoRAs{activeScene.has_audio ? ", and reference audio" : ""}. Only your photo changes.
-          </p>
         </>
       ) : (
         <>
@@ -238,6 +255,37 @@ export function CinemaView({
           setPickingImage(false);
         }}
       />
+
+      <div className="card prompt">
+        <div className="label">
+          <span>{usingScene ? "Caption update" : "Photo notes"}</span>
+          <span>Optional</span>
+        </div>
+        <p className="hint dim">
+          {usingScene
+            ? "Motion stays from the scene; describe what changed in your photo so each slice's prompt matches."
+            : "After the clip is studied, these notes update each slice so motion follows the reference but appearance matches your photo."}
+        </p>
+        {usingScene && activeScene?.preview_prompt ? (
+          <details>
+            <summary className="dim">Saved caption (part 1)</summary>
+            <p className="dim" style={{ whiteSpace: "pre-wrap", fontSize: 13, margin: "8px 0 0" }}>
+              {activeScene.preview_prompt}
+            </p>
+          </details>
+        ) : null}
+        <div className="box">
+          <textarea
+            rows={3}
+            value={usingScene ? sceneNote : settings.cinemaPromptNote}
+            onChange={(e) =>
+              usingScene ? setSceneNote(e.target.value) : updateSettings({ cinemaPromptNote: e.target.value })
+            }
+            placeholder="e.g. She has blonde hair and a red sundress."
+            maxLength={2000}
+          />
+        </div>
+      </div>
 
       <div className="label">
         <span>Clip length per slice</span>
