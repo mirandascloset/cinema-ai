@@ -10,6 +10,10 @@ export type Settings = {
   h3Model: string;
   h3Steps: number;
   selectedSceneId: string;
+  /** Per-scene photo notes that rewrite saved motion captions (key = scene id). */
+  scenePromptNotes: Record<string, string>;
+  /** Photo / appearance notes when studying a new reference video (not a saved scene). */
+  cinemaPromptNote: string;
 };
 
 const DEFAULTS: Settings = {
@@ -20,6 +24,8 @@ const DEFAULTS: Settings = {
   h3Model: "",
   h3Steps: 8,
   selectedSceneId: "",
+  scenePromptNotes: {},
+  cinemaPromptNote: "",
 };
 
 let bag: Settings = normalize(storeGet<Settings>("settings", DEFAULTS));
@@ -35,6 +41,8 @@ function normalize(raw: Partial<Settings>): Settings {
   if (typeof merged.videoSound !== "boolean") merged.videoSound = true;
   if (typeof merged.useRefAudio !== "boolean") merged.useRefAudio = true;
   if (typeof merged.selectedSceneId !== "string") merged.selectedSceneId = "";
+  if (!merged.scenePromptNotes || typeof merged.scenePromptNotes !== "object") merged.scenePromptNotes = {};
+  if (typeof merged.cinemaPromptNote !== "string") merged.cinemaPromptNote = "";
   return merged;
 }
 

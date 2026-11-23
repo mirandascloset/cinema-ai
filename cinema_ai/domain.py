@@ -481,6 +481,35 @@ def studio_paths():
         studio.OUTPUTS, studio.UPLOADS, studio.AUDIO_UPLOADS, studio.RUNTIME, studio.THUMBS = saved
 
 
+def _prompt_note(job: dict) -> str:
+    return (
+        str(job.get("prompt_note") or job.get("scene_prompt_note") or job.get("cinema_prompt_note") or "")
+    ).strip()
+
+
+def apply_photo_prompt_notes(job: dict, segments: list[dict]) -> None:
+    """Rewrite motion prompts so appearance matches the user's photo and optional notes."""
+    note = _prompt_note(job)
+    if not note:
+        return
+    job["stage"] = "Matching captions to your photo"
+    studio.prep_captioner()
+    photo_jpeg = None
+    try:
+        photo_path = UPLOADS / f"{job['image']}.jpg"
+        if photo_path.is_file():
+            photo_jpeg = photo_path.read_bytes()
+    except OSError:
+        photo_jpeg = None
+    total = len(segments)
+    for i, seg in enumerate(segments, 1):
+        if job.get("cancel"):
+            raise InterruptedError
+        seg["prompt"] = vision.patch_scene_prompt(seg["prompt"], note, i, total, photo_jpeg)
+        studio.check_prompt(seg["prompt"])
+    captioner.release()
+
+
 def run_cinema(job: dict) -> None:
     upload_meta(job["image"])
     scene_id = job.get("scene") or ""
@@ -491,13 +520,13 @@ def run_cinema(job: dict) -> None:
         path = Path(vid["path"])
         segments = [{k: s[k] for k in ("start", "duration", "prompt")} for s in scene["segments"]]
         job["stage"] = f"Using saved scene · {scene.get('name') or scene_id}"
-        job["segment_prompts"] = [s["prompt"] for s in segments]
-        job["segments_total"] = len(segments)
     else:
         vid = video_meta(job["video"])
         path = Path(vid["path"])
         segments = describe_video(path, job)
-        job["segment_prompts"] = [s["prompt"] for s in segments]
+    apply_photo_prompt_notes(job, segments)
+    job["segment_prompts"] = [s["prompt"] for s in segments]
+    job["segments_total"] = len(segments)
     job["cinema_segments"] = segments
     if job.get("cancel"):
         raise InterruptedError
@@ -654,7 +683,10 @@ def cinema_job(data: dict) -> dict:
     video_meta(video)
     if not studio.video_ready("h3"):
         raise ValueError(f"{workflows.VIDEO_MODELS['h3']['label']} is still downloading. Open Image Studio once to finish.")
-    if not scene and not captioner.available():
+    prompt_note = str(
+        data.get("scenePromptNote") or data.get("cinemaPromptNote") or data.get("promptNote") or ""
+    ).strip()
+    if (not scene and not captioner.available()) or (prompt_note and not captioner.available()):
         raise ValueError("The prompt writer isn't installed. Open Prompt Generator once to download it.")
     h3 = studio.h3_fields(data)
     seconds = studio.video_seconds(data)
@@ -691,6 +723,8 @@ def cinema_job(data: dict) -> dict:
     }
     if ID_RE.match(scene):
         out["scene"] = scene
+    if prompt_note:
+        out["prompt_note"] = prompt_note[:2000]
     return out
 
 
@@ -863,6 +897,10 @@ def scene_public(meta: dict, slim: bool = True) -> dict:
     row["segments_total"] = len(row.get("segments") or [])
     row["has_audio"] = scene_audio_path(meta["id"]).is_file()
     if not slim:
+        segs = row.get("segments") or []
+        preview = ""
+        if segs and isinstance(segs[0], dict):
+            preview = str(segs[0].get("prompt") or "")
         return {
             "id": row["id"],
             "name": row.get("name", ""),
@@ -876,6 +914,7 @@ def scene_public(meta: dict, slim: bool = True) -> dict:
             "h3_steps": row.get("h3_steps") or 8,
             "sound": row.get("sound") is not False,
             "use_ref_audio": row.get("use_ref_audio") is not False,
+            "preview_prompt": preview,
         }
     return {k: row.get(k) for k in _SCENE_SLIM_KEYS} | {
         "has_audio": row["has_audio"],
