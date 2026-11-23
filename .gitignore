@@ -1,0 +1,10 @@
+runtime/
+outputs/
+scenes/
+favorites/
+__pycache__/
+*.pyc
+.env
+secrets.json
+frontend/node_modules/
+frontend/dist/
