@@ -42,6 +42,12 @@ export type SceneItem = {
   video?: string;
   duration?: number;
   segments_total?: number;
+  has_audio?: boolean;
+  loras?: VideoLoraChoice[];
+  h3_model?: string;
+  h3_steps?: number;
+  sound?: boolean;
+  use_ref_audio?: boolean;
 };
 
 export type GalleryItem = {

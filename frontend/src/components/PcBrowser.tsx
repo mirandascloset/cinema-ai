@@ -34,8 +34,8 @@ type PcSearch = {
   root_id?: string;
 };
 
-const DEFAULT_SAVE_DIR = "media/Image Studio";
-const DEFAULT_GDRIVE_SAVE_DIR = "gdrive:My Drive/Image Studio";
+const DEFAULT_SAVE_DIR = "media/Cinema AI";
+const DEFAULT_GDRIVE_SAVE_DIR = "gdrive:My Drive/Cinema AI";
 const SORT_OPTS: { id: PcSort; label: string }[] = [
   { id: "new", label: "Newest" },
   { id: "old", label: "Oldest" },
@@ -144,16 +144,16 @@ export function PcBrowser({
       ? storeGet<string>("saveDir", DEFAULT_SAVE_DIR)
       : storeGet<string>("pcDir", "");
     void (async () => {
-      // First-run save picker: make sure the default Image Studio folder exists.
+      // First-run save picker: make sure the default Cinema AI folder exists.
       if (saveMode) {
         const rid = rootIdOf(start);
         const def = defaultSaveFor(rid);
         if (start === def || start === DEFAULT_SAVE_DIR || start === DEFAULT_GDRIVE_SAVE_DIR) {
           try {
             if (rid === "gdrive") {
-              await api("/api/pc/mkdir", { dir: "gdrive:My Drive", name: "Image Studio" });
+              await api("/api/pc/mkdir", { dir: "gdrive:My Drive", name: "Cinema AI" });
             } else {
-              await api("/api/pc/mkdir", { dir: "media", name: "Image Studio" });
+              await api("/api/pc/mkdir", { dir: "media", name: "Cinema AI" });
             }
           } catch {
             /* ignore — loadDir will fall back */
@@ -215,13 +215,13 @@ export function PcBrowser({
       const target = defaultSaveFor(nextId);
       if (nextId === "gdrive") {
         try {
-          await api("/api/pc/mkdir", { dir: "gdrive:My Drive", name: "Image Studio" });
+          await api("/api/pc/mkdir", { dir: "gdrive:My Drive", name: "Cinema AI" });
         } catch {
           /* fall through */
         }
       } else if (nextId === "studio") {
         try {
-          await api("/api/pc/mkdir", { dir: "media", name: "Image Studio" });
+          await api("/api/pc/mkdir", { dir: "media", name: "Cinema AI" });
         } catch {
           /* fall through */
         }

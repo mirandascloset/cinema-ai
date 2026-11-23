@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../api";
 import { Icon } from "../icons";
+import { SaveTarget, type SaveItem } from "./SaveTarget";
 import type { GalleryItem } from "../types";
 
 const PAGE = 48;
@@ -10,9 +12,17 @@ export function GalleryView({ onToast, active }: { onToast: (msg: string) => voi
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [viewing, setViewing] = useState<GalleryItem | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [savingScene, setSavingScene] = useState(false);
   const [sceneName, setSceneName] = useState("");
+  const [saveItems, setSaveItems] = useState<SaveItem[] | null>(null);
   const [error, setError] = useState("");
+
+  const closeViewer = useCallback(() => {
+    setViewing(null);
+    setInfoOpen(false);
+    setSceneName("");
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -36,14 +46,26 @@ export function GalleryView({ onToast, active }: { onToast: (msg: string) => voi
   }, [active, refresh]);
 
   useEffect(() => {
-    if (!active) setViewing(null);
-  }, [active]);
+    if (!active) closeViewer();
+  }, [active, closeViewer]);
+
+  useEffect(() => {
+    if (!viewing) return;
+    function onKey(e: KeyboardEvent) {
+      if ((e.target as HTMLElement)?.closest?.("input, textarea, select")) return;
+      if (e.key === "Escape") closeViewer();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewing, closeViewer]);
 
   async function toggleFav(it: GalleryItem) {
     try {
-      await api("/api/favorite", { id: it.id, on: !it.favorite });
-      setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, favorite: !it.favorite } : x)));
-      if (viewing?.id === it.id) setViewing({ ...it, favorite: !it.favorite });
+      const on = !it.favorite;
+      await api("/api/favorite", { id: it.id, on });
+      const next = { ...it, favorite: on };
+      setItems((prev) => prev.map((x) => (x.id === it.id ? next : x)));
+      if (viewing?.id === it.id) setViewing(next);
     } catch (err) {
       onToast(err instanceof Error ? err.message : "Failed");
     }
@@ -66,10 +88,13 @@ export function GalleryView({ onToast, active }: { onToast: (msg: string) => voi
   }
 
   async function openItem(it: GalleryItem) {
+    setViewing(it);
+    setInfoOpen(it.mode === "cinema");
+    setSceneName("");
     try {
       const full = await api<GalleryItem>(`/api/gallery/${it.id}`);
-      setViewing(full);
-      setSceneName("");
+      setViewing((cur) => (cur?.id === full.id ? { ...cur, ...full } : full));
+      setItems((prev) => prev.map((x) => (x.id === full.id ? { ...x, ...full } : x)));
     } catch (err) {
       onToast(err instanceof Error ? err.message : "Could not open");
     }
@@ -79,11 +104,21 @@ export function GalleryView({ onToast, active }: { onToast: (msg: string) => voi
     try {
       await api("/api/delete", { id: it.id });
       setItems((prev) => prev.filter((x) => x.id !== it.id));
-      if (viewing?.id === it.id) setViewing(null);
+      if (viewing?.id === it.id) closeViewer();
       onToast("Deleted");
     } catch (err) {
       onToast(err instanceof Error ? err.message : "Failed");
     }
+  }
+
+  function infoText(it: GalleryItem) {
+    const lines = [
+      it.mode === "cinema" ? "Cinema · MiniMax H3" : "Video",
+      it.quality ? `${it.quality}p` : null,
+      it.duration ? `${it.duration}s` : null,
+      it.segments ? `${it.segments} parts` : null,
+    ].filter(Boolean);
+    return lines.join(" · ");
   }
 
   return (
@@ -115,65 +150,102 @@ export function GalleryView({ onToast, active }: { onToast: (msg: string) => voi
         Nothing yet. Finished Cinema jobs appear here.
       </div>
 
-      {viewing && (
-        <div
-          className="sheet on"
-          onClick={(e) => {
-            if ((e.target as HTMLElement).classList.contains("sheet")) setViewing(null);
-          }}
-        >
-          <div className="sbox tall">
-            <div className="row">
-              <b className="grow">Result</b>
-              <button type="button" className="x" aria-label="Close" onClick={() => setViewing(null)}>
+      {viewing &&
+        createPortal(
+          <div id="viewer" className={`${infoOpen ? "info " : ""}${viewing.video ? "video" : ""}`.trim()}>
+            <div className="vstage">
+              <div className="vslide">
+                {viewing.video ? (
+                  <video
+                    key={viewing.id}
+                    src={`/api/output/${viewing.id}.mp4`}
+                    controls
+                    playsInline
+                    loop
+                    poster={`/api/output/${viewing.id}?thumb=1`}
+                  />
+                ) : (
+                  <img key={viewing.id} src={`/api/output/${viewing.id}`} alt="" draggable={false} />
+                )}
+              </div>
+            </div>
+            <div className="vbar">
+              <button type="button" className="round glass" aria-label="Close" onClick={closeViewer}>
                 <Icon name="x" />
               </button>
-            </div>
-            <div className="photo has">
-              {viewing.video ? (
-                <video src={`/api/output/${viewing.id}.mp4`} controls playsInline autoPlay className="preview" />
-              ) : (
-                <img src={`/api/output/${viewing.id}`} alt="" />
-              )}
-            </div>
-            {viewing.mode === "cinema" && (
-              <>
-                <div className="label">
-                  <span>Save as scene</span>
-                </div>
-                <p className="hint dim">Re-use these motion captions with a new photo — no need to study the reference again.</p>
-                <div className="box">
-                  <input
-                    type="text"
-                    value={sceneName}
-                    onChange={(e) => setSceneName(e.target.value)}
-                    placeholder="Scene name (optional)"
-                    maxLength={120}
-                  />
-                </div>
+              <span className="vcount glass">{viewing.mode === "cinema" ? "Cinema" : "Result"}</span>
+              <div className="vright">
                 <button
                   type="button"
-                  className="primary"
-                  disabled={savingScene}
-                  onClick={() => void saveAsScene(viewing)}
+                  className={`round glass${viewing.favorite ? " on" : ""}`}
+                  aria-label={viewing.favorite ? "Unfavorite" : "Favorite"}
+                  onClick={() => void toggleFav(viewing)}
                 >
-                  <Icon name="save" />
-                  {savingScene ? "Saving…" : "Save as scene"}
+                  <Icon name="star" />
                 </button>
-              </>
-            )}
-            <div className="row acts">
-              <button type="button" onClick={() => void toggleFav(viewing)}>
-                <Icon name="star" />
-                {viewing.favorite ? "Unfavorite" : "Favorite"}
-              </button>
-              <button type="button" onClick={() => void remove(viewing)}>
-                <Icon name="trash" />
-                Delete
-              </button>
+                <button
+                  type="button"
+                  className={`round glass${infoOpen ? " on" : ""}`}
+                  aria-label="Info and actions"
+                  onClick={() => setInfoOpen((v) => !v)}
+                >
+                  <Icon name="info" />
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
+            <div className="vdock glass">
+              <div
+                className="vhandle"
+                role="button"
+                tabIndex={0}
+                aria-label="Collapse"
+                onClick={() => setInfoOpen(false)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") setInfoOpen(false);
+                }}
+              />
+              <p>{infoText(viewing)}</p>
+              <div className="row">
+                <button type="button" onClick={() => setSaveItems([{ id: viewing.id, video: viewing.video }])}>
+                  <Icon name="save" />
+                  <span>Save</span>
+                </button>
+                <button type="button" className={`fav${viewing.favorite ? " on" : ""}`} onClick={() => void toggleFav(viewing)}>
+                  <Icon name="star" />
+                  <span>{viewing.favorite ? "Favorited" : "Favorite"}</span>
+                </button>
+                {viewing.mode === "cinema" && (
+                  <button type="button" disabled={savingScene} onClick={() => void saveAsScene(viewing)}>
+                    <Icon name="save" />
+                    <span>{savingScene ? "Saving…" : "Save scene"}</span>
+                  </button>
+                )}
+                <button type="button" className="danger" onClick={() => void remove(viewing)}>
+                  <Icon name="trash" />
+                  <span>Delete</span>
+                </button>
+              </div>
+              {viewing.mode === "cinema" && infoOpen && (
+                <>
+                  <div className="box">
+                    <input
+                      type="text"
+                      value={sceneName}
+                      onChange={(e) => setSceneName(e.target.value)}
+                      placeholder="Scene name (optional)"
+                      maxLength={120}
+                    />
+                  </div>
+                  <p className="dim">Scene saves motion captions, LoRAs, and reference audio for quick re-runs.</p>
+                </>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+      {createPortal(
+        <SaveTarget items={saveItems} onClose={() => setSaveItems(null)} onToast={onToast} />,
+        document.body,
       )}
     </section>
   );

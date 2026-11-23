@@ -506,7 +506,12 @@ def run_cinema(job: dict) -> None:
         job["use_ref_audio"] = job.get("use_ref_audio", True)
         if job["use_ref_audio"]:
             job["stage"] = "Pulling audio from the reference"
-            job["ref_audio"] = import_reference_audio(path)
+            if scene_id:
+                job["ref_audio"] = scene_ref_audio_id(scene_id)
+                if not job["ref_audio"]:
+                    job["ref_audio"] = import_reference_audio(path)
+            else:
+                job["ref_audio"] = import_reference_audio(path)
             if not job["ref_audio"]:
                 job["use_ref_audio"] = False
                 job["audio_note"] = "No usable audio track — generating without reference sound."
@@ -563,6 +568,7 @@ def run_cinema(job: dict) -> None:
             job["video_id"] = item["id"]
             job["result"] = item
             job.setdefault("results", []).append(item)
+            _stamp_cinema_meta(job, item["id"])
         final_id = job["video_id"]
         if final_id:
             if job.get("ref_audio"):
@@ -570,18 +576,7 @@ def run_cinema(job: dict) -> None:
                 mux_reference_audio(OUTPUTS / f"{final_id}.mp4", job["ref_audio"], ref_duration)
             meta = read_json(OUTPUTS / f"{final_id}.json", None)
             if meta:
-                meta.update(
-                    mode="cinema",
-                    cinema_job=job["id"],
-                    segment_prompts=job["segment_prompts"],
-                    cinema_segments=job.get("cinema_segments"),
-                    ref_video=job.get("video"),
-                    scene_source=job.get("scene") or "",
-                    quality="720",
-                    engine="h3",
-                    ref_audio=job.get("ref_audio"),
-                )
-                write_json(OUTPUTS / f"{final_id}.json", meta)
+                _stamp_cinema_meta(job, final_id)
                 job["result"] = meta
 
 
@@ -647,6 +642,11 @@ def cinema_job(data: dict) -> dict:
         sm = scene_meta(scene)
         video = sm["video"]
         segs_count = len(sm["segments"])
+        scene_loras = normalize_scene_loras(sm.get("loras"))
+        scene_h3 = sm.get("h3_model") if isinstance(sm.get("h3_model"), str) else ""
+        scene_steps = sm.get("h3_steps") if isinstance(sm.get("h3_steps"), int) else 8
+        scene_sound = sm.get("sound") is not False
+        scene_ref_audio = sm.get("use_ref_audio") is not False
     elif ID_RE.match(video):
         segs_count = max(1, len(segment_plan(video_meta(video)["duration"])))
     else:
@@ -659,6 +659,19 @@ def cinema_job(data: dict) -> dict:
     h3 = studio.h3_fields(data)
     seconds = studio.video_seconds(data)
     est = segs_count * studio.estimate(studio.video_time_key("h3", "720", seconds))
+    loras = data.get("loras") if isinstance(data.get("loras"), list) else []
+    if ID_RE.match(scene):
+        loras = scene_loras or normalize_scene_loras(loras)
+        h3_model = scene_h3 or h3.get("h3_model") or ""
+        h3_steps = scene_steps or h3.get("h3_steps") or 8
+        sound = scene_sound
+        use_ref = scene_ref_audio
+    else:
+        h3_model = h3.get("h3_model") or ""
+        h3_steps = h3.get("h3_steps") or 8
+        sound = data.get("sound") is not False
+        use_ref = data.get("useRefAudio") is not False
+        loras = normalize_scene_loras(loras)
     out = {
         "kind": "generate",
         "mode": "cinema",
@@ -668,11 +681,11 @@ def cinema_job(data: dict) -> dict:
         "quality": "720",
         "engine": "h3",
         "seconds": seconds,
-        "loras": data.get("loras") if isinstance(data.get("loras"), list) else [],
-        "h3_model": h3.get("h3_model") or "",
-        "h3_steps": h3.get("h3_steps") or 8,
-        "sound": data.get("sound") is not False,
-        "use_ref_audio": data.get("useRefAudio") is not False,
+        "loras": loras,
+        "h3_model": h3_model,
+        "h3_steps": h3_steps,
+        "sound": sound,
+        "use_ref_audio": use_ref,
         "estimate": est,
         "segments_total": segs_count,
     }
@@ -737,11 +750,66 @@ def gallery_item(item_id: str) -> dict | None:
     return item
 
 
-_SCENE_SLIM_KEYS = ("id", "name", "created", "video", "duration", "segments_total")
+_SCENE_SLIM_KEYS = ("id", "name", "created", "video", "duration", "segments_total", "has_audio")
+_SCENE_AUDIO_EXT = ".wav"
 
 
 def scene_thumb_path(scene_id: str) -> Path:
     return SCENES / f"{scene_id}.jpg"
+
+
+def scene_audio_path(scene_id: str) -> Path:
+    return SCENES / f"{scene_id}{_SCENE_AUDIO_EXT}"
+
+
+def normalize_scene_loras(raw) -> list[dict]:
+    if not isinstance(raw, list):
+        return []
+    by_file: dict[str, str] = {}
+    for row in studio.h3_loras():
+        lid = row.get("id")
+        if not lid:
+            continue
+        for key in ("high", "low", "label"):
+            name = row.get(key)
+            if isinstance(name, str) and name:
+                by_file[Path(name).name] = lid
+                by_file[name] = lid
+        by_file[lid] = lid
+    out: list[dict] = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        lid = row.get("id") or row.get("file")
+        if isinstance(lid, str) and lid in by_file:
+            lid = by_file[lid]
+        elif isinstance(lid, str) and "/" in lid:
+            lid = Path(lid).stem
+        if not lid:
+            continue
+        try:
+            strength = float(row.get("strength", 1.0))
+        except (TypeError, ValueError):
+            strength = 1.0
+        out.append({"id": str(lid), "strength": round(strength, 3)})
+    return out
+
+
+def scene_ref_audio_id(scene_id: str) -> str | None:
+    wav = scene_audio_path(scene_id)
+    if not wav.is_file() or wav.stat().st_size < 200:
+        return None
+    with studio_paths():
+        studio.AUDIO_UPLOADS.mkdir(parents=True, exist_ok=True)
+        aid = new_id()
+        dest = studio.AUDIO_UPLOADS / f"{aid}{_SCENE_AUDIO_EXT}"
+        shutil.copyfile(wav, dest)
+        duration = probe_duration(wav)
+        write_json(
+            studio.AUDIO_UPLOADS / f"{aid}.json",
+            {"id": aid, "name": "scene-reference.wav", "ext": _SCENE_AUDIO_EXT, "duration": round(duration, 2)},
+        )
+        return aid
 
 
 def scene_meta(scene_id: str) -> dict:
@@ -765,11 +833,10 @@ def scenes_list(slim: bool = True) -> list[dict]:
         if not meta or not scene_thumb_path(meta["id"]).is_file():
             continue
         row = dict(meta)
-        row["segments_total"] = len(row.get("segments") or [])
         if slim:
-            items.append({k: row.get(k) for k in _SCENE_SLIM_KEYS})
+            items.append(scene_public(row, slim=True))
         else:
-            items.append(row)
+            items.append(scene_public(row, slim=False))
     return sorted(items, key=lambda i: -i.get("created", 0))
 
 
@@ -780,7 +847,7 @@ def scene_rename(scene_id: str, name: str) -> dict:
         raise ValueError("Enter a name for this scene.")
     meta["name"] = clean
     write_json(SCENES / f"{scene_id}.json", meta)
-    return {k: meta.get(k) for k in _SCENE_SLIM_KEYS if k != "segments_total"} | {"name": clean, "segments_total": len(meta["segments"])}
+    return scene_public(meta, slim=True) | {"name": clean}
 
 
 def scene_delete(scene_id: str) -> None:
@@ -788,6 +855,121 @@ def scene_delete(scene_id: str) -> None:
         return
     (SCENES / f"{scene_id}.json").unlink(missing_ok=True)
     scene_thumb_path(scene_id).unlink(missing_ok=True)
+    scene_audio_path(scene_id).unlink(missing_ok=True)
+
+
+def scene_public(meta: dict, slim: bool = True) -> dict:
+    row = dict(meta)
+    row["segments_total"] = len(row.get("segments") or [])
+    row["has_audio"] = scene_audio_path(meta["id"]).is_file()
+    if not slim:
+        return {
+            "id": row["id"],
+            "name": row.get("name", ""),
+            "created": row.get("created"),
+            "video": row.get("video"),
+            "duration": row.get("duration"),
+            "segments_total": row["segments_total"],
+            "has_audio": row["has_audio"],
+            "loras": row.get("loras") or [],
+            "h3_model": row.get("h3_model") or "",
+            "h3_steps": row.get("h3_steps") or 8,
+            "sound": row.get("sound") is not False,
+            "use_ref_audio": row.get("use_ref_audio") is not False,
+        }
+    return {k: row.get(k) for k in _SCENE_SLIM_KEYS} | {
+        "has_audio": row["has_audio"],
+        "segments_total": row["segments_total"],
+    }
+
+
+def resolve_ref_video(item: dict) -> str:
+    """Find the reference upload id for a Cinema gallery item (older runs omitted ref_video)."""
+    ref_video = str(item.get("ref_video") or "")
+    if ID_RE.match(ref_video):
+        return ref_video
+    parent = item.get("parent")
+    seen: set[str] = set()
+    while parent and parent not in seen:
+        seen.add(str(parent))
+        pm = read_json(OUTPUTS / f"{parent}.json", None)
+        if not pm:
+            break
+        ref_video = str(pm.get("ref_video") or "")
+        if ID_RE.match(ref_video):
+            return ref_video
+        parent = pm.get("parent")
+    cjob = str(item.get("cinema_job") or "")
+    with LOCK:
+        job = JOBS.get(cjob)
+    if job:
+        ref_video = str(job.get("video") or "")
+        if ID_RE.match(ref_video):
+            return ref_video
+    ref_aid = str(item.get("ref_audio") or item.get("audio") or "")
+    if ID_RE.match(ref_aid):
+        am = read_json(RUNTIME / "audio" / f"{ref_aid}.json", None)
+        if am:
+            adur = float(am.get("duration") or 0)
+            if adur >= 0.5:
+                best_id, best_gap = "", 1e9
+                for meta_path in VIDEO_UPLOADS.glob("*.json"):
+                    vm = read_json(meta_path, None)
+                    if not vm or not ID_RE.match(str(vm.get("id") or "")):
+                        continue
+                    vid = str(vm["id"])
+                    ext = vm.get("ext") or ".mp4"
+                    if not (VIDEO_UPLOADS / f"{vid}{ext}").is_file():
+                        continue
+                    gap = abs(float(vm.get("duration") or 0) - adur)
+                    if gap < best_gap:
+                        best_gap, best_id = gap, vid
+                if best_id and best_gap <= 0.35:
+                    return best_id
+    raise ValueError(
+        "This result has no reference video on file. Pick the reference again or run a new Cinema job, then save."
+    )
+
+
+def _stamp_cinema_meta(job: dict, out_id: str) -> None:
+    meta = read_json(OUTPUTS / f"{out_id}.json", None)
+    if not meta:
+        return
+    meta.update(
+        mode="cinema",
+        cinema_job=job.get("id"),
+        segment_prompts=job.get("segment_prompts"),
+        cinema_segments=job.get("cinema_segments"),
+        ref_video=job.get("video"),
+        scene_source=job.get("scene") or "",
+        quality="720",
+        engine="h3",
+        ref_audio=job.get("ref_audio"),
+    )
+    write_json(OUTPUTS / f"{out_id}.json", meta)
+
+
+DEFAULT_SAVE_DIR = "media/Cinema AI"
+DEFAULT_GDRIVE_SAVE_DIR = "gdrive:My Drive/Cinema AI"
+
+
+def save_outputs_to_pc(ids: list, dir_rel: str) -> dict:
+    clean = [i for i in dict.fromkeys(str(x) for x in (ids or [])) if ID_RE.match(i)]
+    if not clean:
+        raise ValueError("Nothing to save yet.")
+    folder = studio.pc_path(dir_rel or DEFAULT_SAVE_DIR)
+    folder.mkdir(parents=True, exist_ok=True)
+    saved = []
+    for out_id in clean:
+        item = read_json(OUTPUTS / f"{out_id}.json", {}) or {}
+        video = bool(item.get("video")) and (OUTPUTS / f"{out_id}.mp4").is_file()
+        src = OUTPUTS / (f"{out_id}.mp4" if video else f"{out_id}.png")
+        if not src.is_file():
+            raise ValueError("That result is gone.")
+        dest = studio.unique_pc_file(folder, f"cinema-ai-{out_id}", ".mp4" if video else ".png")
+        shutil.copyfile(src, dest)
+        saved.append(studio.pc_rel(dest))
+    return {"saved": saved, "dir": studio.pc_rel(folder)}
 
 
 def scene_from_output(output_id: str, name: str = "") -> dict:
@@ -796,11 +978,9 @@ def scene_from_output(output_id: str, name: str = "") -> dict:
     item = read_json(OUTPUTS / f"{output_id}.json", None)
     if not item or not (OUTPUTS / f"{output_id}.png").is_file():
         raise ValueError("That result is gone.")
-    prompts = item.get("segment_prompts") or []
+    prompts = item.get("segment_prompts") or item.get("prompts") or []
     segments = item.get("cinema_segments")
-    ref_video = str(item.get("ref_video") or "")
-    if not ID_RE.match(ref_video):
-        raise ValueError("This result has no reference video on file. Run a new Cinema job and save that as a scene.")
+    ref_video = resolve_ref_video(item)
     if not segments:
         if not prompts:
             raise ValueError("This result has no saved motion captions.")
@@ -815,6 +995,32 @@ def scene_from_output(output_id: str, name: str = "") -> dict:
     thumb_src = video_thumb_bytes(vpath)
     shutil.copyfile(thumb_src, scene_thumb_path(uid))
     label = (name or "").strip()[:120] or f"Scene {uid[:6]}"
+    loras = normalize_scene_loras(item.get("loras"))
+    h3_model = str(item.get("h3Model") or item.get("h3_model") or "")
+    try:
+        h3_steps = int(item.get("steps") or item.get("h3_steps") or 8)
+    except (TypeError, ValueError):
+        h3_steps = 8
+    sound = item.get("sound") is not False
+    use_ref_audio = bool(item.get("ref_audio")) or item.get("use_ref_audio") is not False
+    ref_aid = str(item.get("ref_audio") or item.get("audio") or "")
+    audio_src = None
+    if ID_RE.match(ref_aid):
+        am = read_json(RUNTIME / "audio" / f"{ref_aid}.json", None)
+        if am:
+            audio_src = RUNTIME / "audio" / f"{ref_aid}{am.get('ext', _SCENE_AUDIO_EXT)}"
+        if not audio_src or not audio_src.is_file():
+            audio_src = RUNTIME / "audio" / f"{ref_aid}{_SCENE_AUDIO_EXT}"
+    if audio_src and audio_src.is_file():
+        shutil.copyfile(audio_src, scene_audio_path(uid))
+    elif use_ref_audio:
+        with studio_paths():
+            pulled = import_reference_audio(vpath)
+        if pulled:
+            am = studio.audio_meta(pulled)
+            src = RUNTIME / "audio" / f"{am['id']}{am.get('ext', _SCENE_AUDIO_EXT)}"
+            if src.is_file():
+                shutil.copyfile(src, scene_audio_path(uid))
     meta = {
         "id": uid,
         "name": label,
@@ -823,9 +1029,14 @@ def scene_from_output(output_id: str, name: str = "") -> dict:
         "duration": round(video_meta(ref_video)["duration"], 2),
         "segments": segments,
         "source_output": output_id,
+        "loras": loras,
+        "h3_model": h3_model,
+        "h3_steps": h3_steps,
+        "sound": sound,
+        "use_ref_audio": use_ref_audio and scene_audio_path(uid).is_file(),
     }
     write_json(SCENES / f"{uid}.json", meta)
-    return {k: meta.get(k) for k in _SCENE_SLIM_KEYS} | {"segments_total": len(segments)}
+    return scene_public(meta, slim=True)
 
 
 def set_favorite(out_id: str, on: bool) -> dict:

@@ -61,12 +61,18 @@ export function CinemaView({
       return;
     }
     const hit = scenes.find((s) => s.id === sceneId);
-    if (hit) {
-      setActiveScene(hit);
-      return;
-    }
+    if (hit) setActiveScene(hit);
     void api<SceneItem>(`/api/scenes/${sceneId}`)
-      .then((row) => setActiveScene(row))
+      .then((row) => {
+        setActiveScene(row);
+        updateSettings({
+          h3Loras: row.loras || [],
+          h3Model: row.h3_model || "",
+          h3Steps: row.h3_steps ?? 8,
+          videoSound: row.sound !== false,
+          useRefAudio: row.use_ref_audio !== false,
+        });
+      })
       .catch(() => {
         updateSettings({ selectedSceneId: "" });
         setActiveScene(null);
@@ -198,7 +204,7 @@ export function CinemaView({
             </div>
           </div>
           <p className="hint dim">
-            <b>{activeScene.name}</b> — captions are saved. Only your photo changes; reference audio still comes from the original clip.
+            <b>{activeScene.name}</b> — saved captions, LoRAs{activeScene.has_audio ? ", and reference audio" : ""}. Only your photo changes.
           </p>
         </>
       ) : (

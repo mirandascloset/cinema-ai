@@ -30,9 +30,7 @@ def get_scene(scene_id: str, request: Request, thumb: str | None = Query(None)):
         meta = d.scene_meta(scene_id)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
-    out = {k: meta.get(k) for k in ("id", "name", "created", "video", "duration")}
-    out["segments_total"] = len(meta.get("segments") or [])
-    return out
+    return d.scene_public(meta, slim=False)
 
 
 @router.post("/api/scenes/save")
@@ -44,6 +42,8 @@ async def save_scene(request: Request):
         return d.scene_from_output(output_id, name)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(400, str(exc) or "Could not write the scene.") from exc
 
 
 @router.post("/api/scenes/rename")
