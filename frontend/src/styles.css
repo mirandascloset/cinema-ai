@@ -5,12 +5,19 @@
     --font: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.5 var(--font); }
+  html, body { margin: 0; height: 100%; width: 100%; max-width: 100%; background: var(--bg); color: var(--text); font: 15px/1.5 var(--font); }
   /* Fixed shell (same as classic monolith). React mounts under #root, so #root must be the
      flex column that used to be body's direct children — otherwise main never gets a bounded
      height and overflow-y:auto cannot scroll (phone + Phone Agent iframe). */
-  body { display: flex; flex-direction: column; position: fixed; inset: 0; overflow: hidden; }
-  #root { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100%; width: 100%; overflow: hidden; }
+  html { overflow: hidden; overscroll-behavior: none; }
+  body {
+    display: flex; flex-direction: column; position: fixed; inset: 0;
+    overflow: hidden; overscroll-behavior: none; touch-action: pan-y;
+  }
+  #root {
+    display: flex; flex-direction: column; flex: 1; min-height: 0;
+    height: 100%; width: 100%; max-width: 100%; overflow: hidden;
+  }
   button { font: inherit; color: var(--text); background: var(--soft); border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; cursor: pointer; }
   button.primary { background: var(--grad); border-color: transparent; color: #fff; font-weight: 600; }
   button:disabled { opacity: .45; }
@@ -54,7 +61,16 @@
   #subtabs.who.sm button { flex-direction: row; gap: 6px; font-size: 13px; padding: 8px 10px; }
   #subtabs.who.sm button svg { width: 16px; height: 16px; pointer-events: none; }
 
-  main { position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 8px 16px calc(env(safe-area-inset-bottom) + 28px); }
+  main {
+    position: relative; flex: 1; min-height: 0; width: 100%; max-width: 100%;
+    overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; overscroll-behavior-x: none;
+    -webkit-overflow-scrolling: touch; touch-action: pan-y;
+    padding: 8px 16px calc(env(safe-area-inset-bottom) + 28px);
+    scrollbar-width: none; -ms-overflow-style: none;
+  }
+  main::-webkit-scrollbar { display: none; width: 0; height: 0; }
+  /* Scene editor owns scroll — don't let negative insets widen #main. */
+  main:has(.scene-editor) { padding: 0; overflow: hidden; }
   .pane { display: flex; flex-direction: column; gap: 14px; }
   .label { font-size: 13px; color: var(--dim); margin: 2px 4px -6px; display: flex; justify-content: space-between; }
 
@@ -301,7 +317,12 @@
   .brand .grow { flex: 1; min-width: 0; }
   .qbtn { display: flex; align-items: center; gap: 6px; padding: 7px 12px; font-size: 13.5px; background: rgba(224,80,143,.16); border-color: rgba(224,80,143,.6); }
   .qsummary { display: block; margin: -2px 0 4px; }
-  #qList { display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  #qList {
+    display: flex; flex-direction: column; gap: 8px; max-height: 60vh;
+    overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; -ms-overflow-style: none;
+  }
+  #qList::-webkit-scrollbar { display: none; width: 0; height: 0; }
   .qitem {
     display: flex; gap: 12px; align-items: center;
     padding: 12px 10px 12px 12px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel);
@@ -397,14 +418,12 @@
   .chipwrap button.on { background: var(--grad); border-color: transparent; color: #fff; }
   /*
    * Scene editor: fills #main, fixed header + own scroll body (no position:sticky).
-   * Sticky in Phone Agent WebView was letting labels (e.g. "Create video") bleed above the title.
+   * Stay inside main (no negative insets) so Phone Agent cannot pan sideways.
    */
   .pane.scene-editor {
-    position: absolute;
-    top: -8px; left: -16px; right: -16px;
-    bottom: calc(-1 * (env(safe-area-inset-bottom) + 28px));
+    position: absolute; inset: 0;
     display: flex; flex-direction: column; gap: 0;
-    width: auto; max-width: none; margin: 0; padding: 0;
+    width: 100%; max-width: 100%; height: 100%; margin: 0; padding: 0;
     box-sizing: border-box; min-height: 0; overflow: hidden;
     background: var(--bg); z-index: 1;
   }
@@ -439,10 +458,13 @@
   }
   .scene-editor-body {
     flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto;
-    -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain; overscroll-behavior-x: none;
+    touch-action: pan-y;
     display: flex; flex-direction: column; gap: 14px;
     padding: 12px 16px calc(env(safe-area-inset-bottom) + 24px);
+    scrollbar-width: none; -ms-overflow-style: none;
   }
+  .scene-editor-body::-webkit-scrollbar { display: none; width: 0; height: 0; }
   .scene-section {
     display: flex; flex-direction: column; gap: 12px;
     width: 100%; box-sizing: border-box;
