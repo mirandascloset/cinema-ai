@@ -348,3 +348,15 @@
 }
 .classic-link:hover { text-decoration: underline; }
 #viewer .vright { display: flex; gap: 8px; margin-left: auto; }
+
+  .seglist { display: flex; flex-direction: column; gap: 12px; }
+  .segcard .segframes, .segframes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .segframes.wrap { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .segframes img, .qaframe img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 14px; display: block; background: #1a1a1e; }
+  .qaframe { display: flex; flex-direction: column; gap: 4px; }
+  .qaframe small { font-size: 11px; color: var(--dim); text-align: center; }
+  .qaframe.pass small { color: var(--ok); }
+  .qaframe.fail small { color: var(--bad); }
+  .rowgap { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .rowgap .primary.go { flex: 1; min-width: 160px; }
+  button.ghost { background: transparent; }

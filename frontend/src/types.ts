@@ -33,6 +33,17 @@ export type Job = {
   segment_prompts?: string[];
   segments_total?: number;
   video_id?: string;
+  storyboard_id?: string;
+};
+
+export type SceneSegment = {
+  index: number;
+  start?: number;
+  duration?: number;
+  description?: string;
+  prompt?: string;
+  first?: string;
+  last?: string;
 };
 
 export type SceneItem = {
@@ -43,12 +54,15 @@ export type SceneItem = {
   duration?: number;
   segments_total?: number;
   has_audio?: boolean;
+  kind?: "pack" | "legacy" | string;
   loras?: VideoLoraChoice[];
   h3_model?: string;
   h3_steps?: number;
   sound?: boolean;
   use_ref_audio?: boolean;
   preview_prompt?: string;
+  prompt_note?: string;
+  segments?: SceneSegment[];
 };
 
 export type GalleryItem = {

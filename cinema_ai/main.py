@@ -21,7 +21,7 @@ if str(IS_ROOT) not in sys.path:
 import captioner  # noqa: E402
 import engine  # noqa: E402
 from cinema_ai import domain as d  # noqa: E402
-from cinema_ai.routers import gallery, jobs, media, pc, scenes, status  # noqa: E402
+from cinema_ai.routers import gallery, jobs, media, pc, scenes, status, storyboard  # noqa: E402
 
 DIST = d.HERE / "frontend" / "dist"
 DIST_INDEX = DIST / "index.html"
@@ -132,6 +132,7 @@ app.include_router(pc.router)
 app.include_router(media.router)
 app.include_router(gallery.router)
 app.include_router(scenes.router)
+app.include_router(storyboard.router)
 
 
 def mount_dist_assets() -> None:
@@ -184,7 +185,7 @@ def ensure_frontend_build() -> None:
 def main() -> None:
     if not DIST_INDEX.is_file():
         threading.Thread(target=ensure_frontend_build, daemon=True, name="frontend-build").start()
-    for folder in (d.UPLOADS, d.VIDEO_UPLOADS, d.OUTPUTS, d.THUMBS):
+    for folder in (d.UPLOADS, d.VIDEO_UPLOADS, d.OUTPUTS, d.THUMBS, d.SCENES, d.RUNTIME / "audio"):
         folder.mkdir(parents=True, exist_ok=True)
     threading.Thread(target=d.worker, daemon=True, name="cinema-worker").start()
     print(f"Cinema AI on http://{d.HOST}:{d.PORT}", flush=True)
