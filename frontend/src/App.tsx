@@ -23,6 +23,7 @@ function readTab(): AppTab {
 export default function App() {
   const [tab, setTab] = useState<AppTab>(readTab);
   const [gallerySeen, setGallerySeen] = useState(() => readTab() === "gallery");
+  const [focusSceneId, setFocusSceneId] = useState("");
   const [status, setStatus] = useState<Status | null>(null);
   const [subtitle, setSubtitle] = useState("Runs on your PC");
   const [warn, setWarn] = useState(false);
@@ -161,11 +162,20 @@ export default function App() {
               onToast={showToast}
               onDone={() => goTab("gallery")}
               onUseCreate={() => goTab("create")}
+              focusSceneId={focusSceneId}
+              onFocusConsumed={() => setFocusSceneId("")}
             />
           ) : null}
           {gallerySeen && (
             <div hidden={tab !== "gallery"}>
-              <GalleryView onToast={showToast} active={tab === "gallery"} />
+              <GalleryView
+                onToast={showToast}
+                active={tab === "gallery"}
+                onOpenScene={(sceneId) => {
+                  setFocusSceneId(sceneId);
+                  goTab("scenes");
+                }}
+              />
             </div>
           )}
         </main>

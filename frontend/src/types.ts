@@ -86,6 +86,8 @@ export type GalleryItem = {
   segments?: number;
   prompt?: string;
   segment_prompts?: string[];
+  scene_source?: string;
+  scene?: string;
 };
 
 export type Status = {

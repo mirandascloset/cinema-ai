@@ -1382,3 +1382,112 @@ def video_thumb_bytes(path: Path) -> Path:
         creationflags=NO_WINDOW,
     )
     return out
+
+
+EDGE = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+CAST_PROFILE = HERE / "runtime" / "cast-profile"
+CAST_HOME = {"z": 1.0, "u": 0.5, "v": 0.5}
+CAST = {"id": "", "video": False, "version": 0, "proc": None, "view": dict(CAST_HOME), "seq": 0}
+CAST_LOCK = threading.Lock()
+CAST_CHANGED = threading.Condition()
+
+
+def cast_bump() -> None:
+    with CAST_CHANGED:
+        CAST["seq"] += 1
+        CAST_CHANGED.notify_all()
+
+
+def cast_wait(seq: int, timeout: float = 20) -> None:
+    """Hold the PC screen's request until something changes, so zooming on the phone shows up right away."""
+    with CAST_CHANGED:
+        CAST_CHANGED.wait_for(lambda: CAST["seq"] != seq, timeout)
+
+
+def cast_view(data: dict) -> dict:
+    """Phone zoom: `z` times fitted size, with image point (`u`, `v`) (0..1) centered on screen."""
+    if str(data.get("id") or "") != CAST["id"] or not CAST["id"]:
+        return cast_state()
+    try:
+        z, u, v = (float(data.get(k, CAST_HOME[k])) for k in ("z", "u", "v"))
+        n = int(data.get("n") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Bad zoom.") from exc
+    if 0 < n <= CAST["view"].get("n", 0):
+        return cast_state()
+    CAST["view"] = {"z": max(1.0, min(6.0, z)), "u": max(0.0, min(1.0, u)), "v": max(0.0, min(1.0, v)), "n": n}
+    cast_bump()
+    return cast_state()
+
+
+def cast_kill() -> None:
+    proc = CAST["proc"]
+    if proc and proc.poll() is None:
+        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, creationflags=NO_WINDOW)
+    # Edge can hand windows to helper processes, so also close anything still using the cast profile.
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -like '*{CAST_PROFILE}*' }} | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+    )
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        creationflags=NO_WINDOW,
+        timeout=20,
+    )
+    CAST["proc"] = None
+
+
+def cast_show(item: str) -> dict:
+    if not ID_RE.match(item) or not (OUTPUTS / f"{item}.png").is_file():
+        raise ValueError("That file is gone.")
+    if not EDGE.is_file():
+        raise ValueError("Microsoft Edge isn't installed, so the PC can't show it full screen.")
+    with CAST_LOCK:
+        CAST.update(
+            id=item,
+            video=(OUTPUTS / f"{item}.mp4").is_file(),
+            version=CAST["version"] + 1,
+            view=dict(CAST_HOME),
+        )
+        cast_bump()
+        proc = CAST["proc"]
+        if not proc or proc.poll() is not None:
+            cast_kill()
+            CAST_PROFILE.mkdir(parents=True, exist_ok=True)
+            CAST["proc"] = subprocess.Popen(
+                [
+                    str(EDGE),
+                    f"--user-data-dir={CAST_PROFILE}",
+                    "--kiosk",
+                    f"http://{HOST}:{PORT}/cast",
+                    "--edge-kiosk-type=fullscreen",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--autoplay-policy=no-user-gesture-required",
+                    "--disable-features=Translate",
+                ]
+            )
+    return cast_state()
+
+
+def cast_stop() -> dict:
+    with CAST_LOCK:
+        cast_kill()
+        CAST.update(id="", video=False, version=CAST["version"] + 1, view=dict(CAST_HOME))
+    cast_bump()
+    return cast_state()
+
+
+def cast_state() -> dict:
+    proc = CAST["proc"]
+    active = bool(CAST["id"]) and proc is not None and proc.poll() is None
+    return {
+        "id": CAST["id"] if active else "",
+        "video": CAST["video"],
+        "version": CAST["version"],
+        "active": active,
+        "view": CAST["view"],
+        "seq": CAST["seq"],
+    }

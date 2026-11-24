@@ -379,14 +379,104 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .chipwrap button.on { background: var(--grad); border-color: transparent; color: #fff; }
-  #sceneEditor .rowgap b.grow {
-    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* Scene editor — iPhone-aligned: true-center title, equal side hit targets, even sections */
+  .pane.scene-editor {
+    gap: 16px; padding-bottom: 28px; width: 100%; max-width: 100%;
+    box-sizing: border-box;
   }
-  .seglist { display: flex; flex-direction: column; gap: 12px; }
-  .segcard .segframes, .segframes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .scene-editor-top {
+    position: sticky; top: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: space-between;
+    min-height: 52px; margin: 0; padding: 4px 0 8px;
+    background: linear-gradient(180deg, var(--bg) 78%, transparent);
+    /* Containing block for the absolutely centered title */
+    isolation: isolate;
+  }
+  .scene-editor-side {
+    width: 44px; flex: none; display: flex; align-items: center; z-index: 1;
+  }
+  .scene-editor-side.end { justify-content: flex-end; }
+  .scene-editor-top .scene-icon-btn {
+    width: 44px; height: 44px; padding: 0; margin: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 50%; flex: none;
+  }
+  .scene-editor-top .scene-icon-btn svg.i { width: 20px; height: 20px; }
+  .scene-editor-title {
+    position: absolute; left: 52px; right: 52px; top: 50%;
+    transform: translateY(-50%);
+    margin: 0; padding: 0 4px; text-align: center; pointer-events: none;
+  }
+  .scene-editor-title b {
+    display: block; margin: 0; font-size: 16px; font-weight: 600; line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .scene-editor-title small {
+    display: block; margin: 3px 0 0; color: var(--dim); font-size: 12.5px; line-height: 1.2;
+    font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .scene-section {
+    display: flex; flex-direction: column; gap: 12px;
+    width: 100%; box-sizing: border-box;
+    padding: 16px; border: 1px solid var(--line); border-radius: 22px; background: var(--panel);
+  }
+  .scene-section > .label {
+    margin: 0; padding: 0; align-items: baseline; gap: 10px;
+  }
+  .scene-section > .label > span:first-child {
+    color: var(--text); font-size: 14px; font-weight: 600;
+  }
+  .scene-section > .label > span:last-child {
+    text-align: right; flex: none;
+  }
+  .scene-section > .hint { margin: 0; }
+  .scene-section .box {
+    width: 100%; box-sizing: border-box;
+    background: rgba(255,255,255,.04); padding: 4px 14px;
+  }
+  .scene-section .box input,
+  .scene-section .box textarea {
+    width: 100%; text-align: left; box-sizing: border-box;
+  }
+  .scene-versions {
+    margin: 0; width: 100%;
+    justify-content: flex-start;
+  }
+  .scene-fork-btn, .scene-secondary {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 16px; margin: 0;
+  }
+  .scene-secondary { background: var(--soft); }
+  .scene-generate .primary.go {
+    width: 100%; box-sizing: border-box; justify-content: center; margin: 4px 0 0;
+  }
+  .length-chips {
+    width: 100%;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }
+  .length-chips button {
+    width: 100%; box-sizing: border-box; justify-content: center;
+    padding: 11px 10px; text-align: center; white-space: nowrap;
+  }
+  .seglist { display: flex; flex-direction: column; gap: 14px; width: 100%; margin: 0; }
+  .segcard {
+    gap: 12px; padding: 14px; width: 100%; box-sizing: border-box;
+    background: rgba(255,255,255,.03); margin: 0;
+  }
+  .segcard > .label { margin: 0; padding: 0; }
+  .segcard .segframes, .segframes {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; margin: 0;
+  }
   .segframes.wrap { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
-  .segframes img, .qaframe img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 14px; display: block; background: #1a1a1e; }
-  .qaframe { display: flex; flex-direction: column; gap: 4px; }
+  .segframes img, .qaframe img {
+    width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: 14px;
+    display: block; background: #1a1a1e;
+  }
+  .qaframe { display: flex; flex-direction: column; gap: 6px; min-width: 0; width: 100%; }
+  .qaframe .scene-frame-btn {
+    width: 100%; box-sizing: border-box; justify-content: center;
+    padding: 9px 8px; font-size: 13px; border-radius: 14px; margin: 0;
+  }
   .qaframe small { font-size: 11px; color: var(--dim); text-align: center; }
   .qaframe.pass small { color: var(--ok); }
   .qaframe.fail small { color: var(--bad); }
