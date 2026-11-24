@@ -54,13 +54,18 @@ FFPROBE = shutil.which("ffprobe")
 
 
 def valid_scene_id(sid: str | None) -> bool:
-    """True for legacy hex scene ids and named storyboard pack folders."""
+    """True for legacy hex ids, named packs, and family~version pack ids."""
     if not sid or sid in (".", ".."):
         return False
     if sid.strip() != sid or sid.endswith(".") or sid.endswith(" "):
         return False
     if "/" in sid or "\\" in sid:
         return False
+    if "~" in sid:
+        family, sep, version = sid.partition("~")
+        if not sep or not family or not version or "~" in version:
+            return False
+        return bool(SCENE_ID_RE.match(family) and SCENE_ID_RE.match(version))
     return bool(ID_RE.match(sid) or SCENE_ID_RE.match(sid))
 
 JOBS: dict[str, dict] = {}
@@ -849,21 +854,25 @@ _SCENE_AUDIO_EXT = ".wav"
 
 
 def scene_thumb_path(scene_id: str) -> Path:
-    pack_thumb = SCENES / scene_id / "thumb.jpg"
-    if pack_thumb.is_file():
-        return pack_thumb
+    from cinema_ai import scene_pack as sp
+
+    if sp.is_pack(scene_id):
+        return sp.pack_thumb_path(scene_id)
     return SCENES / f"{scene_id}.jpg"
 
 
 def scene_audio_path(scene_id: str) -> Path:
-    pack_audio = SCENES / scene_id / "audio.wav"
-    if pack_audio.is_file():
-        return pack_audio
+    from cinema_ai import scene_pack as sp
+
+    if sp.is_pack(scene_id):
+        return sp.pack_audio_path(scene_id)
     return SCENES / f"{scene_id}{_SCENE_AUDIO_EXT}"
 
 
 def scene_is_pack(scene_id: str) -> bool:
-    return (SCENES / scene_id / "manifest.json").is_file()
+    from cinema_ai import scene_pack as sp
+
+    return sp.is_pack(scene_id)
 
 
 def normalize_scene_loras(raw) -> list[dict]:
@@ -952,10 +961,13 @@ def scene_meta(scene_id: str) -> dict:
 def scenes_list(slim: bool = True) -> list[dict]:
     if not SCENES.is_dir():
         return []
+    from cinema_ai import scene_pack as sp
+
+    sp.migrate_all_flat_packs()
     items = []
     seen: set[str] = set()
-    # Pack scenes: scenes/<id>/manifest.json
-    for path in SCENES.glob("*/manifest.json"):
+    # Versioned packs: scenes/<family>/<version>/manifest.json
+    for path in SCENES.glob("*/*/manifest.json"):
         meta = read_json(path, None)
         if not meta or not meta.get("id"):
             continue

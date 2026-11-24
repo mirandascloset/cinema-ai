@@ -11,6 +11,12 @@ export async function api<T = Record<string, unknown>>(path: string, body?: unkn
   return data as T;
 }
 
+/** Scene pack ids may include spaces and `family~version` — always encode the id segment. */
+export function sceneApi(id: string, query = ""): string {
+  const q = query ? (query.startsWith("?") ? query : `?${query}`) : "";
+  return `/api/scenes/${encodeURIComponent(id)}${q}`;
+}
+
 export async function pcImport(path: string): Promise<UploadMeta> {
   return api<UploadMeta>("/api/pc/import", { path });
 }

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { api, fmtTime, pollJob } from "../api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, fmtTime, pollJob, sceneApi } from "../api";
 import { Icon } from "../icons";
 import { getSettings, updateSettings, useSettings } from "../settings";
 import type { Job, SceneItem, SceneSegment, Status, UploadMeta } from "../types";
@@ -13,6 +13,23 @@ const LENGTHS = [
   { seconds: 8, note: "Longer" },
   { seconds: 10, note: "Max slice" },
 ] as const;
+
+type FamilyGroup = {
+  key: string;
+  name: string;
+  thumbId: string;
+  versions: SceneItem[];
+  isPack: boolean;
+};
+
+function nextTitle(versions: SceneItem[]): string {
+  const used = new Set(
+    versions.flatMap((v) => [String(v.version || "").toLowerCase(), String(v.version_title || "").toLowerCase()]),
+  );
+  let n = 2;
+  while (used.has(`v${n}`)) n += 1;
+  return `v${n}`;
+}
 
 export function SceneView({
   active,
@@ -39,8 +56,12 @@ export function SceneView({
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<SceneItem | null>(null);
   const [rewriteNote, setRewriteNote] = useState("");
+  const [versionTitle, setVersionTitle] = useState("");
   const [err, setErr] = useState("");
   const [frameKey, setFrameKey] = useState(0);
+  const [openFamily, setOpenFamily] = useState<string | null>(null);
+  const [forkTitle, setForkTitle] = useState("");
+  const [forkSource, setForkSource] = useState("");
 
   const videoMeta = status?.video;
   const h3Meta = videoMeta?.h3 || { loras: [], models: [], steps: [4, 30] };
@@ -48,6 +69,41 @@ export function SceneView({
   const modelLabel = videoMeta?.label || "MiniMax H3";
   const estKey = `720-${settings.videoSeconds}`;
   const est = videoMeta?.models?.h3?.estimates?.[estKey];
+
+  const families = useMemo(() => {
+    const map = new Map<string, FamilyGroup>();
+    for (const it of items) {
+      if (it.kind === "pack" && it.family) {
+        const key = it.family;
+        const row = map.get(key) || {
+          key,
+          name: it.name || key,
+          thumbId: it.id,
+          versions: [],
+          isPack: true,
+        };
+        row.versions.push(it);
+        if (it.version === "v1") row.thumbId = it.id;
+        map.set(key, row);
+      } else {
+        map.set(it.id, {
+          key: it.id,
+          name: it.name || it.id,
+          thumbId: it.id,
+          versions: [it],
+          isPack: false,
+        });
+      }
+    }
+    return Array.from(map.values()).map((f) => ({
+      ...f,
+      versions: [...f.versions].sort((a, b) => {
+        if (a.version === "v1") return -1;
+        if (b.version === "v1") return 1;
+        return (a.created || 0) - (b.created || 0);
+      }),
+    }));
+  }, [items]);
 
   const refresh = useCallback(async () => {
     try {
@@ -66,24 +122,70 @@ export function SceneView({
   }, [active, refresh]);
 
   useEffect(() => {
-    if (!active) setEditing(null);
+    if (!active) {
+      setEditing(null);
+      setOpenFamily(null);
+    }
   }, [active]);
 
-  async function openScene(id: string) {
+  useEffect(() => {
+    if (!editing) return;
+    setVersionTitle(editing.version_title || editing.version || editing.name || "");
+  }, [editing?.id, editing?.version_title, editing?.version, editing?.name]);
+
+  async function openVersion(id: string) {
     try {
-      const row = await api<SceneItem>(`/api/scenes/${id}`);
+      const row = await api<SceneItem>(sceneApi(id));
       setEditing(row);
       setRewriteNote("");
+      setOpenFamily(null);
       setFrameKey((k) => k + 1);
     } catch (e) {
       onToast(e instanceof Error ? e.message : "Couldn't open scene");
     }
   }
 
+  function selectFamily(group: FamilyGroup) {
+    if (!group.isPack) {
+      void openVersion(group.versions[0]?.id || group.key);
+      return;
+    }
+    if (openFamily === group.key) {
+      setOpenFamily(null);
+      return;
+    }
+    const source = group.versions.find((v) => v.version === "v1") || group.versions[0];
+    setOpenFamily(group.key);
+    setForkSource(source?.id || "");
+    setForkTitle(nextTitle(group.versions));
+  }
+
+  async function createVersion(sourceId: string, title: string) {
+    const clean = title.trim();
+    if (!clean) {
+      onToast("Name this version");
+      return;
+    }
+    setBusy(true);
+    try {
+      const row = await api<SceneItem>("/api/scenes/fork", { source: sourceId, title: clean });
+      await refresh();
+      setEditing(row);
+      setRewriteNote("");
+      setOpenFamily(null);
+      setFrameKey((k) => k + 1);
+      onToast(`Created “${clean}” — edits save to this version.`);
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : "Couldn't create version");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function saveSegment(seg: SceneSegment, description: string) {
     if (!editing) return;
     try {
-      const row = await api<SceneItem>(`/api/scenes/${editing.id}/segment`, {
+      const row = await api<SceneItem>(sceneApi(editing.id, "") + "/segment", {
         index: seg.index,
         description,
       });
@@ -102,7 +204,7 @@ export function SceneView({
       onImage: (meta: UploadMeta) => {
         void (async () => {
           try {
-            const row = await api<SceneItem>(`/api/scenes/${editing.id}/frame`, {
+            const row = await api<SceneItem>(sceneApi(editing.id, "") + "/frame", {
               index: seg.index,
               which,
               image: meta.id,
@@ -125,13 +227,27 @@ export function SceneView({
     }
     setBusy(true);
     try {
-      const row = await api<SceneItem>(`/api/scenes/${editing.id}/rewrite`, { note: rewriteNote.trim() });
+      const row = await api<SceneItem>(sceneApi(editing.id, "") + "/rewrite", { note: rewriteNote.trim() });
       setEditing(row);
       onToast("Updated all segment descriptions");
     } catch (e) {
       onToast(e instanceof Error ? e.message : "Couldn't rewrite prompts");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveVersionTitle() {
+    if (!editing) return;
+    const clean = versionTitle.trim();
+    if (!clean || clean === (editing.version_title || editing.version)) return;
+    try {
+      const row = await api<SceneItem>("/api/scenes/rename", { id: editing.id, name: clean });
+      setEditing(row);
+      await refresh();
+      onToast("Version title saved");
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : "Couldn't rename");
     }
   }
 
@@ -158,7 +274,7 @@ export function SceneView({
         useRefAudio: settings.useRefAudio,
       });
       onJob(job);
-      onToast("Generating dual-frame clips from this scene…");
+      onToast("Creating video from this version…");
       const final = await pollJob(job.id, (tick) => onJob(tick));
       onJob(final);
       if (final.status === "done") {
@@ -181,16 +297,29 @@ export function SceneView({
   function useOnCreate(scene: SceneItem) {
     updateSettings({ selectedSceneId: scene.id });
     setEditing(null);
-    onToast(`Using “${scene.name}” — add a photo on Create.`);
+    onToast(`Using “${scene.label || scene.name}” — add a photo on Create.`);
     onUseCreate();
   }
 
-  async function remove(scene: SceneItem) {
+  async function removeVersion(scene: SceneItem) {
     try {
       await api("/api/scenes/delete", { id: scene.id });
       setItems((prev) => prev.filter((x) => x.id !== scene.id));
       if (getSettings().selectedSceneId === scene.id) updateSettings({ selectedSceneId: "" });
       if (editing?.id === scene.id) setEditing(null);
+      await refresh();
+      onToast("Version deleted");
+    } catch (e) {
+      onToast(e instanceof Error ? e.message : "Failed");
+    }
+  }
+
+  async function removeFamily(group: FamilyGroup) {
+    try {
+      await api("/api/scenes/delete", { family: group.key, deleteFamily: true });
+      if (editing?.family === group.key) setEditing(null);
+      if (openFamily === group.key) setOpenFamily(null);
+      await refresh();
       onToast("Scene deleted");
     } catch (e) {
       onToast(e instanceof Error ? e.message : "Failed");
@@ -200,6 +329,7 @@ export function SceneView({
   if (editing) {
     const isPack = editing.kind === "pack";
     const segments = editing.segments || [];
+    const siblings = editing.versions || items.filter((x) => x.family && x.family === editing.family);
     return (
       <section className="pane" id="sceneEditor">
         <div className="rowgap">
@@ -208,15 +338,64 @@ export function SceneView({
             All scenes
           </button>
           <b className="grow">{editing.name}</b>
-          <button type="button" className="ghost" disabled={busy} onClick={() => void remove(editing)}>
+          <button type="button" className="ghost" disabled={busy} onClick={() => void removeVersion(editing)}>
             <Icon name="trash" />
           </button>
         </div>
         <p className="hint dim">
           {isPack
-            ? `${editing.segments_total || segments.length} parts · swap any first/last still, edit text, then generate`
+            ? `${editing.segments_total || segments.length} parts · edits save to this version · Create video extends like Action`
             : "Legacy caption pack — use on Create with a photo, or make a new storyboard scene for frame editing."}
         </p>
+
+        {isPack && (
+          <div className="card prompt">
+            <div className="label">
+              <span>Version title</span>
+              <span>{editing.version === "v1" ? "Original analyze" : "Saved with edits"}</span>
+            </div>
+            <div className="box">
+              <input
+                value={versionTitle}
+                disabled={busy}
+                onChange={(e) => setVersionTitle(e.target.value)}
+                onBlur={() => void saveVersionTitle()}
+                maxLength={120}
+                placeholder="e.g. blue jacket"
+              />
+            </div>
+            {siblings.length > 1 && (
+              <>
+                <div className="label">
+                  <span>Versions</span>
+                  <span>{siblings.length}</span>
+                </div>
+                <div className="chipwrap">
+                  {siblings.map((v) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      className={v.id === editing.id ? "on" : ""}
+                      disabled={busy}
+                      onClick={() => void openVersion(v.id)}
+                    >
+                      {v.version_title || v.version || v.id}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() => void createVersion(editing.id, nextTitle(siblings))}
+            >
+              <Icon name="plus" />
+              New version from this
+            </button>
+          </div>
+        )}
 
         {!isPack ? (
           <button type="button" className="primary go" onClick={() => useOnCreate(editing)}>
@@ -310,7 +489,7 @@ export function SceneView({
               <span>{modelReady ? "Create video" : "Downloading…"}</span>
             </button>
             <p className="hint">
-              Each part uses that segment&apos;s first + last frame (dual-frame i2v)
+              Part 1 starts from the first beat, then extends through each part like Create → Action
               {est ? ` · ~${fmtTime(est)} per slice` : ""}.
             </p>
           </>
@@ -323,21 +502,87 @@ export function SceneView({
     <section className="pane">
       {err && <p className="err">{err}</p>}
       <p className="hint">
-        Storyboard scenes include first/last frames, descriptions, and audio. Open one to edit and create a video.
-        Legacy gallery scenes still work on Create.
+        Storyboard analyze saves <b>v1</b>. Tap a scene to name a new version or open an existing one.
       </p>
-      <div className="grid">
-        {items.map((it) => (
-          <button key={it.id} type="button" className="tile" onClick={() => void openScene(it.id)}>
-            <img loading="lazy" src={`/api/scenes/${it.id}?thumb=1`} alt="" />
-            <span>
-              {it.name}
-              {it.kind === "pack" ? "" : ""}
-            </span>
-          </button>
-        ))}
+      <div className="scenelist">
+        {families.map((group) => {
+          const open = openFamily === group.key;
+          return (
+            <div key={group.key} className={`scenefamily${open ? " open" : ""}`}>
+              <button type="button" className="scenerow" onClick={() => selectFamily(group)}>
+                <img loading="lazy" src={sceneApi(group.thumbId, "thumb=1")} alt="" />
+                <span className="scenerow-text">
+                  <b>{group.name}</b>
+                  <small>
+                    {group.isPack
+                      ? `${group.versions.length} version${group.versions.length === 1 ? "" : "s"}`
+                      : "Legacy scene"}
+                  </small>
+                </span>
+                <Icon name="chev" />
+              </button>
+              {open && group.isPack && (
+                <div className="card scenefork">
+                  <div className="label">
+                    <span>New version</span>
+                    <span>Edits save here</span>
+                  </div>
+                  <div className="box">
+                    <input
+                      value={forkTitle}
+                      onChange={(e) => setForkTitle(e.target.value)}
+                      placeholder="Version title"
+                      maxLength={120}
+                      disabled={busy}
+                      autoCapitalize="sentences"
+                    />
+                  </div>
+                  <div className="label">
+                    <span>Copy from</span>
+                  </div>
+                  <div className="chipwrap">
+                    {group.versions.map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        className={forkSource === v.id ? "on" : ""}
+                        disabled={busy}
+                        onClick={() => setForkSource(v.id)}
+                      >
+                        {v.version_title || v.version}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="primary go"
+                    disabled={busy || !forkSource || !forkTitle.trim()}
+                    onClick={() => void createVersion(forkSource, forkTitle)}
+                  >
+                    <Icon name="plus" />
+                    Create & edit
+                  </button>
+                  <div className="label">
+                    <span>Open existing</span>
+                  </div>
+                  <div className="chipwrap">
+                    {group.versions.map((v) => (
+                      <button key={v.id} type="button" disabled={busy} onClick={() => void openVersion(v.id)}>
+                        {v.version_title || v.version}
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" className="ghost" disabled={busy} onClick={() => void removeFamily(group)}>
+                    <Icon name="trash" />
+                    Delete scene
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
-      <div className="empty" hidden={loading || items.length > 0}>
+      <div className="empty" hidden={loading || families.length > 0}>
         <div className="avatar">
           <Icon name="cast" />
         </div>
@@ -377,7 +622,7 @@ function SegmentCard({
         {(["first", "last"] as const).map((which) => (
           <div key={which} className="qaframe">
             <img
-              src={`/api/scenes/${sceneId}?frame=${which}&index=${seg.index}&v=${frameKey}`}
+              src={sceneApi(sceneId, `frame=${which}&index=${seg.index}&v=${frameKey}`)}
               alt={`${which} frame`}
             />
             <button type="button" disabled={disabled} onClick={() => onChangeFrame(which)}>

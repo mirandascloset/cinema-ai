@@ -70,8 +70,26 @@ async def rename_scene(request: Request):
 @router.post("/api/scenes/delete")
 async def delete_scene(request: Request):
     data = await request.json()
-    d.scene_delete(str(data.get("id") or ""))
+    sid = str(data.get("id") or data.get("family") or "")
+    if data.get("familyOnly") or data.get("deleteFamily"):
+        parsed = sp.parse_pack_id(sid)
+        family = str(data.get("family") or (parsed[0] if parsed else sid))
+        if family:
+            sp.delete_family(family)
+        return {"ok": True}
+    d.scene_delete(sid)
     return {"ok": True}
+
+
+@router.post("/api/scenes/fork")
+async def fork_scene(request: Request):
+    data = await request.json()
+    try:
+        return sp.fork_version(str(data.get("source") or data.get("id") or ""), str(data.get("title") or data.get("name") or "") or None)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(400, str(exc) or "Could not create that version.") from exc
 
 
 @router.post("/api/scenes/{scene_id}/segment")
