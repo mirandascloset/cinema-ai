@@ -49,6 +49,10 @@ export type SceneSegment = {
 export type SceneItem = {
   id: string;
   name: string;
+  family?: string;
+  version?: string;
+  version_title?: string;
+  label?: string;
   created?: number;
   video?: string;
   duration?: number;
@@ -62,7 +66,9 @@ export type SceneItem = {
   use_ref_audio?: boolean;
   preview_prompt?: string;
   prompt_note?: string;
+  parent_version?: string;
   segments?: SceneSegment[];
+  versions?: SceneItem[];
 };
 
 export type GalleryItem = {

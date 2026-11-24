@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, fmtTime, pollJob } from "../api";
+import { api, fmtTime, pollJob, sceneApi } from "../api";
 import { updateSettings, useSettings } from "../settings";
 import { Icon } from "../icons";
 import type { Job, SceneItem, Status, UploadMeta, VideoMeta } from "../types";
@@ -68,7 +68,7 @@ export function CinemaView({
     }
     const hit = scenes.find((s) => s.id === sceneId);
     if (hit) setActiveScene(hit);
-    void api<SceneItem>(`/api/scenes/${sceneId}`)
+    void api<SceneItem>(sceneApi(sceneId))
       .then((row) => {
         setActiveScene(row);
         updateSettings({
@@ -201,8 +201,8 @@ export function CinemaView({
                 className={`scenechip${sceneId === s.id ? " on" : ""}`}
                 onClick={() => updateSettings({ selectedSceneId: s.id })}
               >
-                <img src={`/api/scenes/${s.id}?thumb=1`} alt="" />
-                <span>{s.name}</span>
+                <img src={sceneApi(s.id, "thumb=1")} alt="" />
+                <span>{s.label || s.name}</span>
               </button>
             ))}
           </div>
@@ -216,7 +216,7 @@ export function CinemaView({
             <span>{activeScene.segments_total || "?"} parts</span>
           </div>
           <div className="photo has sm">
-            <img src={`/api/scenes/${activeScene.id}?thumb=1`} alt="" className="preview" />
+            <img src={sceneApi(activeScene.id, "thumb=1")} alt="" className="preview" />
             <div className="over">
               <button type="button" onClick={() => updateSettings({ selectedSceneId: "" })}>
                 Use a new video

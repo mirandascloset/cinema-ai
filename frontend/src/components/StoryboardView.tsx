@@ -75,9 +75,10 @@ export function StoryboardView({
     <div className="pane" id="storyboardPane">
       <div className="card prompt">
         <div className="label">
-          <span>Storyboard name</span>
+          <span>Scene name</span>
           <span>Required</span>
         </div>
+        <p className="hint dim">This titles the scene and its folder under Scenes (saved as version v1).</p>
         <div className="box">
           <input
             type="text"
@@ -85,6 +86,8 @@ export function StoryboardView({
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Kitchen morning take"
             maxLength={120}
+            required
+            autoComplete="off"
           />
         </div>
       </div>
@@ -126,14 +129,16 @@ export function StoryboardView({
         type="button"
         className="primary go"
         disabled={busy || !video || !name.trim()}
+        title={!name.trim() ? "Enter a scene name first" : !video ? "Choose a reference video" : undefined}
         onClick={() => void analyze()}
       >
         <Icon name="spark" />
         <span>{busy ? "Working…" : "Analyze"}</span>
       </button>
+      {!name.trim() && <p className="hint dim">Enter a scene name above to enable Analyze.</p>}
       <p className="hint">
-        Splits into ≤10s segments with first/last frames, descriptions, and audio — then saves under Scenes for editing
-        and video generation.
+        Splits into ≤10s segments with first/last frames, descriptions, and audio — saves as{" "}
+        <b>scenes/{name.trim() || "Your scene"}/v1</b> for editing and video generation.
       </p>
     </div>
   );
