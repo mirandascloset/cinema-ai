@@ -40,6 +40,8 @@ export function SceneView({
   onToast,
   onDone,
   onUseCreate,
+  focusSceneId,
+  onFocusConsumed,
 }: {
   active: boolean;
   status: Status | null;
@@ -49,6 +51,9 @@ export function SceneView({
   onToast: (msg: string) => void;
   onDone?: () => void;
   onUseCreate: () => void;
+  /** Open this scene/version when arriving from Gallery (or elsewhere). */
+  focusSceneId?: string;
+  onFocusConsumed?: () => void;
 }) {
   const settings = useSettings();
   const { openPicker } = useSourcePicker();
@@ -127,6 +132,28 @@ export function SceneView({
       setOpenFamily(null);
     }
   }, [active]);
+
+  useEffect(() => {
+    if (!active || !focusSceneId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const row = await api<SceneItem>(sceneApi(focusSceneId));
+        if (cancelled) return;
+        setEditing(row);
+        setRewriteNote("");
+        setOpenFamily(null);
+        setFrameKey((k) => k + 1);
+      } catch (e) {
+        if (!cancelled) onToast(e instanceof Error ? e.message : "Couldn't open that scene");
+      } finally {
+        onFocusConsumed?.();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active, focusSceneId, onFocusConsumed, onToast]);
 
   useEffect(() => {
     if (!editing) return;
@@ -330,47 +357,59 @@ export function SceneView({
     const isPack = editing.kind === "pack";
     const segments = editing.segments || [];
     const siblings = editing.versions || items.filter((x) => x.family && x.family === editing.family);
+    const versionLabel = editing.version_title || editing.version || "v1";
     return (
-      <section className="pane" id="sceneEditor">
-        <div className="rowgap">
-          <button type="button" className="ghost" onClick={() => setEditing(null)}>
-            <Icon name="back" />
-            All scenes
-          </button>
-          <b className="grow">{editing.name}</b>
-          <button type="button" className="ghost" disabled={busy} onClick={() => void removeVersion(editing)}>
-            <Icon name="trash" />
-          </button>
-        </div>
-        <p className="hint dim">
-          {isPack
-            ? `${editing.segments_total || segments.length} parts · edits save to this version · Create video extends like Action`
-            : "Legacy caption pack — use on Create with a photo, or make a new storyboard scene for frame editing."}
-        </p>
+      <section className="pane scene-editor" id="sceneEditor">
+        <header className="scene-editor-top">
+          <div className="scene-editor-side">
+            <button type="button" className="ghost scene-icon-btn" aria-label="All scenes" onClick={() => setEditing(null)}>
+              <Icon name="back" />
+            </button>
+          </div>
+          <div className="scene-editor-title">
+            <b>{editing.name}</b>
+            {isPack && <small>{versionLabel}</small>}
+          </div>
+          <div className="scene-editor-side end">
+            <button
+              type="button"
+              className="ghost scene-icon-btn"
+              disabled={busy}
+              aria-label="Delete version"
+              onClick={() => void removeVersion(editing)}
+            >
+              <Icon name="trash" />
+            </button>
+          </div>
+        </header>
 
-        {isPack && (
-          <div className="card prompt">
-            <div className="label">
-              <span>Version title</span>
-              <span>{editing.version === "v1" ? "Original analyze" : "Saved with edits"}</span>
-            </div>
-            <div className="box">
-              <input
-                value={versionTitle}
-                disabled={busy}
-                onChange={(e) => setVersionTitle(e.target.value)}
-                onBlur={() => void saveVersionTitle()}
-                maxLength={120}
-                placeholder="e.g. blue jacket"
-              />
-            </div>
-            {siblings.length > 1 && (
-              <>
-                <div className="label">
-                  <span>Versions</span>
-                  <span>{siblings.length}</span>
-                </div>
-                <div className="chipwrap">
+        {!isPack ? (
+          <div className="scene-section">
+            <p className="hint dim">Legacy caption pack — use on Create with a photo, or make a new storyboard scene for frame editing.</p>
+            <button type="button" className="primary go" onClick={() => useOnCreate(editing)}>
+              <Icon name="wand" />
+              <span>Use on Create</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="scene-section">
+              <div className="label">
+                <span>Version</span>
+                <span>{editing.version === "v1" ? "Original analyze" : "Editable copy"}</span>
+              </div>
+              <div className="box">
+                <input
+                  value={versionTitle}
+                  disabled={busy}
+                  onChange={(e) => setVersionTitle(e.target.value)}
+                  onBlur={() => void saveVersionTitle()}
+                  maxLength={120}
+                  placeholder="e.g. blue jacket"
+                />
+              </div>
+              {siblings.length > 1 && (
+                <div className="chipwrap scene-versions">
                   {siblings.map((v) => (
                     <button
                       key={v.id}
@@ -383,33 +422,24 @@ export function SceneView({
                     </button>
                   ))}
                 </div>
-              </>
-            )}
-            <button
-              type="button"
-              className="primary"
-              disabled={busy}
-              onClick={() => void createVersion(editing.id, nextTitle(siblings))}
-            >
-              <Icon name="plus" />
-              New version from this
-            </button>
-          </div>
-        )}
+              )}
+              <button
+                type="button"
+                className="ghost scene-fork-btn"
+                disabled={busy}
+                onClick={() => void createVersion(editing.id, nextTitle(siblings))}
+              >
+                <Icon name="plus" />
+                New version from this
+              </button>
+            </div>
 
-        {!isPack ? (
-          <button type="button" className="primary go" onClick={() => useOnCreate(editing)}>
-            <Icon name="wand" />
-            <span>Use on Create</span>
-          </button>
-        ) : (
-          <>
-            <div className="card prompt">
+            <div className="scene-section">
               <div className="label">
-                <span>Update all descriptions</span>
+                <span>Rewrite all prompts</span>
                 <span>Optional</span>
               </div>
-              <p className="hint dim">Rewrites every segment prompt (keeps motion, updates appearance notes).</p>
+              <p className="hint dim">Keeps motion, updates appearance notes on every segment.</p>
               <div className="box">
                 <textarea
                   rows={3}
@@ -419,79 +449,91 @@ export function SceneView({
                   maxLength={2000}
                 />
               </div>
-              <button type="button" disabled={busy || !rewriteNote.trim()} onClick={() => void applyRewrite()}>
+              <button
+                type="button"
+                className="scene-secondary"
+                disabled={busy || !rewriteNote.trim()}
+                onClick={() => void applyRewrite()}
+              >
                 <Icon name="text" />
                 Apply to all segments
               </button>
             </div>
 
-            <div className="seglist">
-              {segments.map((seg) => (
-                <SegmentCard
-                  key={`${editing.id}-${seg.index}-${frameKey}`}
-                  sceneId={editing.id}
-                  seg={seg}
-                  frameKey={frameKey}
-                  disabled={busy}
-                  onSave={(text) => void saveSegment(seg, text)}
-                  onChangeFrame={(which) => changeFrame(seg, which)}
-                />
-              ))}
+            <div className="scene-section">
+              <div className="label">
+                <span>Segments</span>
+                <span>{segments.length} parts</span>
+              </div>
+              <div className="seglist">
+                {segments.map((seg) => (
+                  <SegmentCard
+                    key={`${editing.id}-${seg.index}-${frameKey}`}
+                    sceneId={editing.id}
+                    seg={seg}
+                    frameKey={frameKey}
+                    disabled={busy}
+                    onSave={(text) => void saveSegment(seg, text)}
+                    onChangeFrame={(which) => changeFrame(seg, which)}
+                  />
+                ))}
+              </div>
             </div>
 
-            <div className="label">
-              <span>Clip length per slice</span>
-              <span>720p</span>
+            <div className="scene-section scene-generate">
+              <div className="label">
+                <span>Create video</span>
+                <span>720p · H3</span>
+              </div>
+              <div className="chipwrap length-chips">
+                {LENGTHS.map((l) => (
+                  <button
+                    key={l.seconds}
+                    type="button"
+                    className={settings.videoSeconds === l.seconds ? "on" : ""}
+                    onClick={() => updateSettings({ videoSeconds: l.seconds })}
+                  >
+                    {l.seconds}s · {l.note}
+                  </button>
+                ))}
+              </div>
+
+              <VideoLoraCard
+                modelId="h3"
+                modelLabel={modelLabel}
+                avail={h3Meta.loras || []}
+                max={videoMeta?.maxLoras || 3}
+                onToast={onToast}
+              />
+              <ToggleCard
+                title="Reference audio"
+                note="Uses the soundtrack saved with this scene."
+                checked={settings.useRefAudio}
+                onChange={(on) => updateSettings({ useRefAudio: on })}
+              />
+              <ToggleCard
+                title="Generated ambience"
+                note="When reference audio is off (or missing), H3 can still invent a soundtrack."
+                checked={settings.videoSound}
+                onChange={(on) => updateSettings({ videoSound: on })}
+              />
+
+              {err && <div className="err">{err}</div>}
+
+              <button
+                type="button"
+                className="primary go"
+                disabled={busy || !modelReady || !segments.length}
+                onClick={() => void generate()}
+              >
+                <Icon name="wand" />
+                <span>{modelReady ? "Create video" : "Downloading…"}</span>
+              </button>
+              <p className="hint">
+                Part 1 starts from the first beat, then extends through each part like Create → Action
+                {est ? ` · ~${fmtTime(est)} per slice` : ""}.
+              </p>
             </div>
-            <div className="who sm">
-              {LENGTHS.map((l) => (
-                <button
-                  key={l.seconds}
-                  type="button"
-                  className={settings.videoSeconds === l.seconds ? "on" : ""}
-                  onClick={() => updateSettings({ videoSeconds: l.seconds })}
-                >
-                  {l.seconds}s
-                  <small>{l.note}</small>
-                </button>
-              ))}
-            </div>
-
-            <VideoLoraCard
-              modelId="h3"
-              modelLabel={modelLabel}
-              avail={h3Meta.loras || []}
-              max={videoMeta?.maxLoras || 3}
-              onToast={onToast}
-            />
-            <ToggleCard
-              title="Reference audio"
-              note="Uses the soundtrack saved with this scene."
-              checked={settings.useRefAudio}
-              onChange={(on) => updateSettings({ useRefAudio: on })}
-            />
-            <ToggleCard
-              title="Generated ambience"
-              note="When reference audio is off (or missing), H3 can still invent a soundtrack."
-              checked={settings.videoSound}
-              onChange={(on) => updateSettings({ videoSound: on })}
-            />
-
-            {err && <div className="err">{err}</div>}
-
-            <button
-              type="button"
-              className="primary go"
-              disabled={busy || !modelReady || !segments.length}
-              onClick={() => void generate()}
-            >
-              <Icon name="wand" />
-              <span>{modelReady ? "Create video" : "Downloading…"}</span>
-            </button>
-            <p className="hint">
-              Part 1 starts from the first beat, then extends through each part like Create → Action
-              {est ? ` · ~${fmtTime(est)} per slice` : ""}.
-            </p>
           </>
         )}
       </section>
@@ -611,12 +653,13 @@ function SegmentCard({
   useEffect(() => setText(seg.description || seg.prompt || ""), [seg.description, seg.prompt]);
 
   return (
-    <div className="card segcard">
+    <article className="card segcard">
       <div className="label">
         <span>
-          Segment {(seg.index ?? 0) + 1} · {Math.round(seg.duration || 0)}s
+          Part {(seg.index ?? 0) + 1}
+          {seg.duration != null ? ` · ${Math.round(seg.duration)}s` : ""}
         </span>
-        <span>@{Math.round(seg.start || 0)}s</span>
+        <span>{seg.start != null ? `@${Math.round(seg.start)}s` : ""}</span>
       </div>
       <div className="segframes">
         {(["first", "last"] as const).map((which) => (
@@ -625,7 +668,7 @@ function SegmentCard({
               src={sceneApi(sceneId, `frame=${which}&index=${seg.index}&v=${frameKey}`)}
               alt={`${which} frame`}
             />
-            <button type="button" disabled={disabled} onClick={() => onChangeFrame(which)}>
+            <button type="button" className="scene-frame-btn" disabled={disabled} onClick={() => onChangeFrame(which)}>
               Change {which}
             </button>
           </div>
@@ -633,7 +676,7 @@ function SegmentCard({
       </div>
       <div className="box">
         <textarea
-          rows={4}
+          rows={5}
           value={text}
           disabled={disabled}
           onChange={(e) => setText(e.target.value)}
@@ -643,8 +686,9 @@ function SegmentCard({
             if (next && next !== prev) onSave(next);
           }}
           maxLength={4000}
+          placeholder="Describe this part…"
         />
       </div>
-    </div>
+    </article>
   );
 }

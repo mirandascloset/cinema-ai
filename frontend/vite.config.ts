@@ -7,6 +7,7 @@ export default defineConfig({
     port: 5175,
     proxy: {
       "/api": "http://127.0.0.1:8798",
+      "/cast": "http://127.0.0.1:8798",
     },
   },
   build: {

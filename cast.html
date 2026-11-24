@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cinema AI</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  img, video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity .4s; }
+  img { transition: opacity .4s, transform .14s linear; will-change: transform; }
+  .on { opacity: 1; }
+</style>
+</head>
+<body>
+<img id="img" alt="">
+<video id="vid" autoplay loop playsinline></video>
+<script>
+const img = document.getElementById("img"), vid = document.getElementById("vid");
+let version = -1, seq = -1, view = { z: 1, u: 0.5, v: 0.5 };
+
+// Same zoom as the phone: `z` times the fitted size, with image point (u, v) in the middle of the screen.
+function applyView() {
+  const W = innerWidth, H = innerHeight, nw = img.naturalWidth, nh = img.naturalHeight;
+  if (!nw || view.z <= 1.001) { img.style.transform = ""; return; }
+  const fit = Math.min(W / nw, H / nh), w = nw * fit * view.z, h = nh * fit * view.z;
+  let x = (0.5 - view.u) * w, y = (0.5 - view.v) * h;
+  const mx = Math.max(0, (w - W) / 2), my = Math.max(0, (h - H) / 2);
+  x = Math.min(mx, Math.max(-mx, x)); y = Math.min(my, Math.max(-my, y));
+  img.style.transform = `translate(${x}px, ${y}px) scale(${view.z})`;
+}
+addEventListener("resize", applyView);
+
+async function poll() {
+  try {
+    const s = await (await fetch(`api/cast?wait=${seq}`, { cache: "no-store" })).json();
+    seq = s.seq;
+    view = s.view || { z: 1, u: 0.5, v: 0.5 };
+    if (s.version !== version) {
+      version = s.version;
+      img.style.transform = "";
+      if (!s.id) { img.className = vid.className = ""; vid.pause(); }
+      else if (s.video) {
+        img.className = "";
+        vid.poster = `api/output/${s.id}`;
+        vid.src = `api/output/${s.id}.mp4`;
+        vid.className = "on";
+        vid.play().catch(() => { vid.muted = true; vid.play().catch(() => {}); });
+      } else {
+        vid.pause(); vid.removeAttribute("src"); vid.className = "";
+        img.onload = () => { img.className = "on"; applyView(); };
+        img.src = `api/output/${s.id}`;
+      }
+    } else if (!s.video) applyView();
+    setTimeout(poll, s.seq === undefined ? 700 : 0);
+  } catch {
+    setTimeout(poll, 1000);
+  }
+}
+poll();
+</script>
+</body>
+</html>

@@ -17,6 +17,7 @@ type Pt = { x: number; y: number };
 type Swipe = { x: number; y: number; t: number; axis: "" | "x" | "y" | "none"; dx: number; dy: number; id: number };
 
 type GalleryPage = { items: GalleryItem[]; hasMore?: boolean };
+type CastState = { active?: boolean; id?: string };
 
 function niceName(file: string): string {
   return file
@@ -24,6 +25,16 @@ function niceName(file: string): string {
     .replace(/[_\-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function sceneSourceId(item: GalleryItem): string {
+  return String(item.scene_source || item.scene || "").trim();
+}
+
+function sceneSourceLabel(id: string): string {
+  if (!id) return "";
+  const [family, version] = id.includes("~") ? id.split("~", 2) : [id, ""];
+  return version ? `${family} · ${version}` : family;
 }
 
 function infoLines(item: GalleryItem): string {
@@ -36,6 +47,8 @@ function infoLines(item: GalleryItem): string {
     item.segments ? `${item.segments} parts` : null,
   ].filter(Boolean);
   if (bits.length) lines.push(bits.join(" · "));
+  const src = sceneSourceId(item);
+  if (src) lines.push(`Scene: ${sceneSourceLabel(src)}`);
   for (const l of item.loras || []) {
     const name = niceName(String(l.file || l.id || ""));
     if (name) lines.push(`LoRA: ${name} (${l.strength ?? 1})`);
@@ -48,7 +61,15 @@ function infoLines(item: GalleryItem): string {
   return lines.join("\n");
 }
 
-export function GalleryView({ onToast, active }: { onToast: (msg: string) => void; active: boolean }) {
+export function GalleryView({
+  onToast,
+  active,
+  onOpenScene,
+}: {
+  onToast: (msg: string) => void;
+  active: boolean;
+  onOpenScene?: (sceneId: string) => void;
+}) {
   const [items, setItems] = useState<GalleryItem[]>([]);
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -61,21 +82,40 @@ export function GalleryView({ onToast, active }: { onToast: (msg: string) => voi
   const [sceneName, setSceneName] = useState("");
   const [saveItems, setSaveItems] = useState<SaveItem[] | null>(null);
   const [error, setError] = useState("");
+  const [casting, setCasting] = useState("");
+  const [castStopping, setCastStopping] = useState(false);
 
   const slideRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const castTimer = useRef<number | null>(null);
   const swipe = useRef<Swipe | null>(null);
   const pts = useRef(new Map<number, Pt>());
   const viewingRef = useRef(viewing);
   const infoOpenRef = useRef(infoOpen);
+  const castingRef = useRef(casting);
   const loadingMoreRef = useRef(false);
   const itemsLenRef = useRef(0);
   const hasMoreRef = useRef(true);
   viewingRef.current = viewing;
   infoOpenRef.current = infoOpen;
+  castingRef.current = casting;
   itemsLenRef.current = items.length;
   hasMoreRef.current = hasMore;
+
+  const renderCast = useCallback((state: CastState) => {
+    const id = state.active ? state.id || "" : "";
+    setCasting(id);
+    if (castTimer.current) window.clearInterval(castTimer.current);
+    castTimer.current = null;
+    if (id) {
+      castTimer.current = window.setInterval(() => {
+        void api<CastState>("/api/cast")
+          .then(renderCast)
+          .catch(() => {});
+      }, 5000);
+    }
+  }, []);
 
   /** Fresh first page: pick up new gens / fav changes without reloading older pages. */
   const refreshHead = useCallback(async () => {
@@ -161,8 +201,24 @@ export function GalleryView({ onToast, active }: { onToast: (msg: string) => voi
   }, [active, hasMore, loadMore, items.length, loading]);
 
   useEffect(() => {
+    void api<CastState>("/api/cast")
+      .then(renderCast)
+      .catch(() => {});
+    return () => {
+      if (castTimer.current) window.clearInterval(castTimer.current);
+    };
+  }, [renderCast]);
+
+  useEffect(() => {
     setBare(false);
     setSceneName("");
+  }, [viewing?.id]);
+
+  // Follow cast target when swiping while casting.
+  useEffect(() => {
+    if (!viewing || !casting || casting === viewing.id) return;
+    void castTo(viewing.id, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewing?.id]);
 
   useEffect(() => {
@@ -249,6 +305,39 @@ export function GalleryView({ onToast, active }: { onToast: (msg: string) => voi
         slide.style.transform = "";
       }
     }, 200);
+  }
+
+  async function castTo(id: string, quiet = false) {
+    setCasting(id);
+    try {
+      const state = await api<CastState>("/api/cast", { id });
+      renderCast(state);
+      if (!quiet && state.active) {
+        onToast("Showing on the PC. Swipe to change what it shows.");
+      }
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Cast failed");
+    }
+  }
+
+  async function toggleCast() {
+    if (!viewing) return;
+    if (casting === viewing.id) {
+      onToast("Already showing on the PC");
+      return;
+    }
+    if (!casting && !confirm(`Show this ${viewing.video ? "video" : "image"} full screen on the PC?`)) return;
+    await castTo(viewing.id);
+  }
+
+  async function stopCast() {
+    setCastStopping(true);
+    try {
+      renderCast(await api<CastState>("/api/cast/stop", {}));
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Failed");
+    }
+    setCastStopping(false);
   }
 
   async function toggleFav(item: GalleryItem) {
@@ -359,6 +448,13 @@ export function GalleryView({ onToast, active }: { onToast: (msg: string) => voi
   const idx = viewing ? viewList.findIndex((it) => it.id === viewing.id) : -1;
   const countLabel = viewing && viewList.length > 1 ? `${idx + 1} / ${viewList.length}` : "";
   const canSaveScene = viewing?.mode === "cinema" || viewing?.mode === "scene_video";
+  const viewingSceneId = viewing ? sceneSourceId(viewing) : "";
+
+  function goToScene(sceneId: string) {
+    if (!onOpenScene || !sceneId) return;
+    closeViewer();
+    onOpenScene(sceneId);
+  }
 
   return (
     <section className="pane">
@@ -393,109 +489,138 @@ export function GalleryView({ onToast, active }: { onToast: (msg: string) => voi
         Nothing yet. Finished Cinema jobs appear here.
       </div>
 
-      {viewing &&
+      {(casting || viewing) &&
         createPortal(
-          <div
-            id="viewer"
-            className={`${infoOpen ? "info " : ""}${bare ? "bare " : ""}${viewing.video ? "video" : ""}`.trim()}
-          >
-            <div
-              className="vstage"
-              ref={stageRef}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerUp={onPointerUp}
-              onPointerCancel={onPointerUp}
-            >
-              <div className="vslide" ref={slideRef}>
-                {viewing.video ? (
-                  <video
-                    key={viewing.id}
-                    src={`/api/output/${viewing.id}.mp4`}
-                    controls
-                    playsInline
-                    loop
-                    autoPlay
-                    poster={`/api/output/${viewing.id}?thumb=1`}
-                  />
-                ) : (
-                  <img key={viewing.id} src={`/api/output/${viewing.id}`} alt="" draggable={false} />
-                )}
-              </div>
-            </div>
-            <div className="vbar">
-              <button type="button" className="round glass" aria-label="Close" onClick={closeViewer}>
-                <Icon name="x" />
-              </button>
-              <span className="vcount glass">{countLabel}</span>
-              <div className="vright">
-                <button
-                  type="button"
-                  className={`round glass${viewing.favorite ? " on" : ""}`}
-                  id="vHeart"
-                  aria-label={viewing.favorite ? "Unfavorite" : "Favorite"}
-                  onClick={() => void toggleFav(viewing)}
-                >
-                  <Icon name="heart" />
-                </button>
-                <button
-                  type="button"
-                  className={`round glass${infoOpen ? " on" : ""}`}
-                  aria-label="Info and actions"
-                  onClick={() => setInfoOpen((v) => !v)}
-                >
-                  <Icon name="info" />
+          <>
+            {casting ? (
+              <div id="castPill" className="glass">
+                <i />
+                <span>Showing on PC</span>
+                <button type="button" disabled={castStopping} onClick={() => void stopCast()}>
+                  Stop
                 </button>
               </div>
-            </div>
-            <div className="vdock glass">
+            ) : null}
+
+            {viewing ? (
               <div
-                className="vhandle"
-                role="button"
-                tabIndex={0}
-                aria-label="Collapse"
-                onClick={() => setInfoOpen(false)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") setInfoOpen(false);
-                }}
-              />
-              <p style={{ whiteSpace: "pre-wrap" }}>{infoLines(viewing)}</p>
-              <div className="row">
-                <button type="button" className={`fav${viewing.favorite ? " on" : ""}`} onClick={() => void toggleFav(viewing)}>
-                  <Icon name="star" />
-                  <span>{viewing.favorite ? "Favorited" : "Favorite"}</span>
-                </button>
-                <button type="button" onClick={() => setSaveItems([{ id: viewing.id, video: viewing.video }])}>
-                  <Icon name="save" />
-                  <span>Save</span>
-                </button>
-                {canSaveScene && (
-                  <button type="button" disabled={savingScene} onClick={() => void saveAsScene(viewing)}>
-                    <Icon name="save" />
-                    <span>{savingScene ? "Saving…" : "Save scene"}</span>
-                  </button>
-                )}
-                <button type="button" className="danger" onClick={() => void remove(viewing)}>
-                  <Icon name="trash" />
-                  <span>Delete</span>
-                </button>
-              </div>
-              {canSaveScene && infoOpen && (
-                <>
-                  <div className="box">
-                    <input
-                      type="text"
-                      value={sceneName}
-                      onChange={(e) => setSceneName(e.target.value)}
-                      placeholder="Scene name (optional)"
-                      maxLength={120}
-                    />
+                id="viewer"
+                className={`${infoOpen ? "info " : ""}${bare ? "bare " : ""}${viewing.video ? "video" : ""}`.trim()}
+              >
+                <div
+                  className="vstage"
+                  ref={stageRef}
+                  onPointerDown={onPointerDown}
+                  onPointerMove={onPointerMove}
+                  onPointerUp={onPointerUp}
+                  onPointerCancel={onPointerUp}
+                >
+                  <div className="vslide" ref={slideRef}>
+                    {viewing.video ? (
+                      <video
+                        key={viewing.id}
+                        src={`/api/output/${viewing.id}.mp4`}
+                        controls
+                        playsInline
+                        loop
+                        autoPlay
+                        poster={`/api/output/${viewing.id}?thumb=1`}
+                      />
+                    ) : (
+                      <img key={viewing.id} src={`/api/output/${viewing.id}`} alt="" draggable={false} />
+                    )}
                   </div>
-                  <p className="dim">Scene saves motion captions, LoRAs, and reference audio for quick re-runs.</p>
-                </>
-              )}
-            </div>
-          </div>,
+                </div>
+                <div className="vbar">
+                  <button type="button" className="round glass" aria-label="Close" onClick={closeViewer}>
+                    <Icon name="x" />
+                  </button>
+                  <span className="vcount glass">{countLabel}</span>
+                  <div className="vright">
+                    <button
+                      type="button"
+                      className={`round glass${viewing.favorite ? " on" : ""}`}
+                      id="vHeart"
+                      aria-label={viewing.favorite ? "Unfavorite" : "Favorite"}
+                      onClick={() => void toggleFav(viewing)}
+                    >
+                      <Icon name="heart" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`round glass${casting ? " on" : ""}`}
+                      id="vCast"
+                      aria-label="Show full screen on the PC"
+                      onClick={() => void toggleCast()}
+                    >
+                      <Icon name="cast" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`round glass${infoOpen ? " on" : ""}`}
+                      aria-label="Info and actions"
+                      onClick={() => setInfoOpen((v) => !v)}
+                    >
+                      <Icon name="info" />
+                    </button>
+                  </div>
+                </div>
+                <div className="vdock glass">
+                  <div
+                    className="vhandle"
+                    role="button"
+                    tabIndex={0}
+                    aria-label="Collapse"
+                    onClick={() => setInfoOpen(false)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") setInfoOpen(false);
+                    }}
+                  />
+                  <p style={{ whiteSpace: "pre-wrap" }}>{infoLines(viewing)}</p>
+                  <div className="row">
+                    <button type="button" className={`fav${viewing.favorite ? " on" : ""}`} onClick={() => void toggleFav(viewing)}>
+                      <Icon name="star" />
+                      <span>{viewing.favorite ? "Favorited" : "Favorite"}</span>
+                    </button>
+                    <button type="button" onClick={() => setSaveItems([{ id: viewing.id, video: viewing.video }])}>
+                      <Icon name="save" />
+                      <span>Save</span>
+                    </button>
+                    {viewingSceneId && onOpenScene && (
+                      <button type="button" onClick={() => goToScene(viewingSceneId)}>
+                        <Icon name="cast" />
+                        <span>Open scene</span>
+                      </button>
+                    )}
+                    {canSaveScene && (
+                      <button type="button" disabled={savingScene} onClick={() => void saveAsScene(viewing)}>
+                        <Icon name="save" />
+                        <span>{savingScene ? "Saving…" : "Save scene"}</span>
+                      </button>
+                    )}
+                    <button type="button" className="danger" onClick={() => void remove(viewing)}>
+                      <Icon name="trash" />
+                      <span>Delete</span>
+                    </button>
+                  </div>
+                  {canSaveScene && infoOpen && (
+                    <>
+                      <div className="box">
+                        <input
+                          type="text"
+                          value={sceneName}
+                          onChange={(e) => setSceneName(e.target.value)}
+                          placeholder="Scene name (optional)"
+                          maxLength={120}
+                        />
+                      </div>
+                      <p className="dim">Scene saves motion captions, LoRAs, and reference audio for quick re-runs.</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </>,
           document.body,
         )}
       {createPortal(

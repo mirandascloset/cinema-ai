@@ -11,7 +11,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 IS_ROOT = Path(__file__).resolve().parent.parent.parent / "image-studio"
@@ -21,7 +21,7 @@ if str(IS_ROOT) not in sys.path:
 import captioner  # noqa: E402
 import engine  # noqa: E402
 from cinema_ai import domain as d  # noqa: E402
-from cinema_ai.routers import gallery, jobs, media, pc, scenes, status, storyboard  # noqa: E402
+from cinema_ai.routers import cast, gallery, jobs, media, pc, scenes, status, storyboard  # noqa: E402
 
 DIST = d.HERE / "frontend" / "dist"
 DIST_INDEX = DIST / "index.html"
@@ -126,11 +126,20 @@ def index():
     return Response(shell_bytes(), media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/cast")
+def cast_page():
+    path = d.HERE / "cast.html"
+    if not path.is_file():
+        raise HTTPException(404, "Not found")
+    return FileResponse(path, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
+
+
 app.include_router(status.router)
 app.include_router(jobs.router)
 app.include_router(pc.router)
 app.include_router(media.router)
 app.include_router(gallery.router)
+app.include_router(cast.router)
 app.include_router(scenes.router)
 app.include_router(storyboard.router)
 
@@ -151,7 +160,7 @@ mount_dist_assets()
 @app.get("/{full_path:path}")
 def spa_fallback(full_path: str):
     head = full_path.split("/", 1)[0]
-    if head in ("api", "assets"):
+    if head in ("api", "assets", "cast"):
         raise HTTPException(404, "Not found")
     return Response(shell_bytes(), media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
 
