@@ -30,7 +30,7 @@ export function QueueSheet({
 
   async function cancel(id: string) {
     try {
-      await api(`/api/jobs/${id}/cancel`);
+      await api(`/api/jobs/${id}/cancel`, {});
       onRefresh();
     } catch (err) {
       onToast(err instanceof Error ? err.message : "Couldn't cancel");

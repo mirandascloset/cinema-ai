@@ -3,18 +3,20 @@ import { api, storeGet, storeSet } from "./api";
 import { CinemaView } from "./components/CinemaView";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { GalleryView } from "./components/GalleryView";
-import { SceneView } from "./components/SceneView";
 import { Header } from "./components/Header";
 import { QueueSheet } from "./components/QueueSheet";
+import { SceneView } from "./components/SceneView";
 import { SourcePickerProvider } from "./components/SourcePicker";
+import { StoryboardView } from "./components/StoryboardView";
 import type { AppTab } from "./components/Tabs";
 import { IconSprite } from "./icons";
 import type { Job, Status } from "./types";
 
+const TABS: AppTab[] = ["create", "storyboard", "scenes", "gallery"];
+
 function readTab(): AppTab {
   const saved = storeGet<string>("tab", "create");
-  if (saved === "gallery") return "gallery";
-  if (saved === "scenes") return "scenes";
+  if (TABS.includes(saved as AppTab)) return saved as AppTab;
   return "create";
 }
 
@@ -131,8 +133,32 @@ export default function App() {
               onToast={showToast}
               onDone={() => goTab("gallery")}
             />
+          ) : tab === "storyboard" ? (
+            <StoryboardView
+              status={status}
+              busy={busy}
+              setBusy={setBusy}
+              onJob={(j) => {
+                upsertJob(j);
+                void refreshQueue();
+              }}
+              onToast={showToast}
+              onSaved={() => goTab("scenes")}
+            />
           ) : tab === "scenes" ? (
-            <SceneView active={tab === "scenes"} onToast={showToast} onUse={() => goTab("create")} />
+            <SceneView
+              active={tab === "scenes"}
+              status={status}
+              busy={busy}
+              setBusy={setBusy}
+              onJob={(j) => {
+                upsertJob(j);
+                void refreshQueue();
+              }}
+              onToast={showToast}
+              onDone={() => goTab("gallery")}
+              onUseCreate={() => goTab("create")}
+            />
           ) : (
             <GalleryView onToast={showToast} active={tab === "gallery"} />
           )}
