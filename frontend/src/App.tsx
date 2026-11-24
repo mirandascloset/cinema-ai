@@ -22,6 +22,7 @@ function readTab(): AppTab {
 
 export default function App() {
   const [tab, setTab] = useState<AppTab>(readTab);
+  const [gallerySeen, setGallerySeen] = useState(() => readTab() === "gallery");
   const [status, setStatus] = useState<Status | null>(null);
   const [subtitle, setSubtitle] = useState("Runs on your PC");
   const [warn, setWarn] = useState(false);
@@ -86,8 +87,10 @@ export default function App() {
     window.dispatchEvent(new Event("ca:nav"));
     setTab(next);
     storeSet("tab", next);
+    if (next === "gallery") setGallerySeen(true);
     const main = document.getElementById("main");
-    if (main) main.scrollTop = 0;
+    // Keep gallery scroll position when returning to it (Image Studio pattern).
+    if (main && next !== "gallery") main.scrollTop = 0;
   }, []);
 
   useEffect(() => {
@@ -159,8 +162,11 @@ export default function App() {
               onDone={() => goTab("gallery")}
               onUseCreate={() => goTab("create")}
             />
-          ) : (
-            <GalleryView onToast={showToast} active={tab === "gallery"} />
+          ) : null}
+          {gallerySeen && (
+            <div hidden={tab !== "gallery"}>
+              <GalleryView onToast={showToast} active={tab === "gallery"} />
+            </div>
           )}
         </main>
         <QueueSheet

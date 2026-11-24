@@ -808,15 +808,49 @@ _GALLERY_SLIM_KEYS = (
     "segments",
 )
 
+# id -> (json mtime, meta) — avoid re-reading every output JSON on each poll/page.
+_GALLERY_INDEX: dict[str, tuple[float, dict]] = {}
+_GALLERY_INDEX_LOCK = threading.Lock()
 
-def gallery(limit: int | None = None, offset: int = 0, slim: bool = False) -> list[dict]:
+
+def _sync_gallery_index() -> list[dict]:
+    """Refresh the in-memory gallery index; only re-parse JSON files whose mtime changed."""
     if not OUTPUTS.is_dir():
+        with _GALLERY_INDEX_LOCK:
+            _GALLERY_INDEX.clear()
         return []
-    items = [read_json(p, None) for p in OUTPUTS.glob("*.json")]
+    seen: set[str] = set()
+    with _GALLERY_INDEX_LOCK:
+        for path in OUTPUTS.glob("*.json"):
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            sid = path.stem
+            if not ID_RE.match(sid):
+                continue
+            seen.add(sid)
+            prev = _GALLERY_INDEX.get(sid)
+            if prev and prev[0] == mtime:
+                continue
+            meta = read_json(path, None)
+            if not meta or not meta.get("id"):
+                _GALLERY_INDEX.pop(sid, None)
+                continue
+            _GALLERY_INDEX[sid] = (mtime, dict(meta))
+        for sid in list(_GALLERY_INDEX):
+            if sid not in seen:
+                del _GALLERY_INDEX[sid]
+        items = [dict(meta) for _, meta in _GALLERY_INDEX.values()]
     items = sorted(
         (i for i in items if i and (OUTPUTS / f"{i['id']}.png").is_file()),
-        key=lambda i: -i.get("created", 0),
+        key=lambda i: -float(i.get("created") or 0),
     )
+    return items
+
+
+def gallery(limit: int | None = None, offset: int = 0, slim: bool = False) -> list[dict]:
+    items = _sync_gallery_index()
     if offset > 0:
         items = items[offset:]
     out: list[dict] = []
