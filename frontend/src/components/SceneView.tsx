@@ -144,6 +144,8 @@ export function SceneView({
         setRewriteNote("");
         setOpenFamily(null);
         setFrameKey((k) => k + 1);
+        const main = document.getElementById("main");
+        if (main) main.scrollTop = 0;
       } catch (e) {
         if (!cancelled) onToast(e instanceof Error ? e.message : "Couldn't open that scene");
       } finally {
@@ -167,6 +169,8 @@ export function SceneView({
       setRewriteNote("");
       setOpenFamily(null);
       setFrameKey((k) => k + 1);
+      const main = document.getElementById("main");
+      if (main) main.scrollTop = 0;
     } catch (e) {
       onToast(e instanceof Error ? e.message : "Couldn't open scene");
     }
@@ -383,159 +387,161 @@ export function SceneView({
           </div>
         </header>
 
-        {!isPack ? (
-          <div className="scene-section">
-            <p className="hint dim">Legacy caption pack — use on Create with a photo, or make a new storyboard scene for frame editing.</p>
-            <button type="button" className="primary go" onClick={() => useOnCreate(editing)}>
-              <Icon name="wand" />
-              <span>Use on Create</span>
-            </button>
-          </div>
-        ) : (
-          <>
+        <div className="scene-editor-body">
+          {!isPack ? (
             <div className="scene-section">
-              <div className="label">
-                <span>Version</span>
-                <span>{editing.version === "v1" ? "Original analyze" : "Editable copy"}</span>
-              </div>
-              <div className="box">
-                <input
-                  value={versionTitle}
+              <p className="hint dim">Legacy caption pack — use on Create with a photo, or make a new storyboard scene for frame editing.</p>
+              <button type="button" className="primary go" onClick={() => useOnCreate(editing)}>
+                <Icon name="wand" />
+                <span>Use on Create</span>
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="scene-section">
+                <div className="label">
+                  <span>Version</span>
+                  <span>{editing.version === "v1" ? "Original analyze" : "Editable copy"}</span>
+                </div>
+                <div className="box">
+                  <input
+                    value={versionTitle}
+                    disabled={busy}
+                    onChange={(e) => setVersionTitle(e.target.value)}
+                    onBlur={() => void saveVersionTitle()}
+                    maxLength={120}
+                    placeholder="e.g. blue jacket"
+                  />
+                </div>
+                {siblings.length > 1 && (
+                  <div className="chipwrap scene-versions">
+                    {siblings.map((v) => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        className={v.id === editing.id ? "on" : ""}
+                        disabled={busy}
+                        onClick={() => void openVersion(v.id)}
+                      >
+                        {v.version_title || v.version || v.id}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="ghost scene-fork-btn"
                   disabled={busy}
-                  onChange={(e) => setVersionTitle(e.target.value)}
-                  onBlur={() => void saveVersionTitle()}
-                  maxLength={120}
-                  placeholder="e.g. blue jacket"
-                />
+                  onClick={() => void createVersion(editing.id, nextTitle(siblings))}
+                >
+                  <Icon name="plus" />
+                  New version from this
+                </button>
               </div>
-              {siblings.length > 1 && (
-                <div className="chipwrap scene-versions">
-                  {siblings.map((v) => (
-                    <button
-                      key={v.id}
-                      type="button"
-                      className={v.id === editing.id ? "on" : ""}
+
+              <div className="scene-section">
+                <div className="label">
+                  <span>Rewrite all prompts</span>
+                  <span>Optional</span>
+                </div>
+                <p className="hint dim">Keeps motion, updates appearance notes on every segment.</p>
+                <div className="box">
+                  <textarea
+                    rows={3}
+                    value={rewriteNote}
+                    onChange={(e) => setRewriteNote(e.target.value)}
+                    placeholder="e.g. Blonde hair, red sundress, soft daylight."
+                    maxLength={2000}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="scene-secondary"
+                  disabled={busy || !rewriteNote.trim()}
+                  onClick={() => void applyRewrite()}
+                >
+                  <Icon name="text" />
+                  Apply to all segments
+                </button>
+              </div>
+
+              <div className="scene-section">
+                <div className="label">
+                  <span>Segments</span>
+                  <span>{segments.length} parts</span>
+                </div>
+                <div className="seglist">
+                  {segments.map((seg) => (
+                    <SegmentCard
+                      key={`${editing.id}-${seg.index}-${frameKey}`}
+                      sceneId={editing.id}
+                      seg={seg}
+                      frameKey={frameKey}
                       disabled={busy}
-                      onClick={() => void openVersion(v.id)}
+                      onSave={(text) => void saveSegment(seg, text)}
+                      onChangeFrame={(which) => changeFrame(seg, which)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="scene-section scene-generate">
+                <div className="label">
+                  <span>Create video</span>
+                  <span>720p · H3</span>
+                </div>
+                <div className="chipwrap length-chips">
+                  {LENGTHS.map((l) => (
+                    <button
+                      key={l.seconds}
+                      type="button"
+                      className={settings.videoSeconds === l.seconds ? "on" : ""}
+                      onClick={() => updateSettings({ videoSeconds: l.seconds })}
                     >
-                      {v.version_title || v.version || v.id}
+                      {l.seconds}s · {l.note}
                     </button>
                   ))}
                 </div>
-              )}
-              <button
-                type="button"
-                className="ghost scene-fork-btn"
-                disabled={busy}
-                onClick={() => void createVersion(editing.id, nextTitle(siblings))}
-              >
-                <Icon name="plus" />
-                New version from this
-              </button>
-            </div>
 
-            <div className="scene-section">
-              <div className="label">
-                <span>Rewrite all prompts</span>
-                <span>Optional</span>
-              </div>
-              <p className="hint dim">Keeps motion, updates appearance notes on every segment.</p>
-              <div className="box">
-                <textarea
-                  rows={3}
-                  value={rewriteNote}
-                  onChange={(e) => setRewriteNote(e.target.value)}
-                  placeholder="e.g. Blonde hair, red sundress, soft daylight."
-                  maxLength={2000}
+                <VideoLoraCard
+                  modelId="h3"
+                  modelLabel={modelLabel}
+                  avail={h3Meta.loras || []}
+                  max={videoMeta?.maxLoras || 3}
+                  onToast={onToast}
                 />
-              </div>
-              <button
-                type="button"
-                className="scene-secondary"
-                disabled={busy || !rewriteNote.trim()}
-                onClick={() => void applyRewrite()}
-              >
-                <Icon name="text" />
-                Apply to all segments
-              </button>
-            </div>
+                <ToggleCard
+                  title="Reference audio"
+                  note="Uses the soundtrack saved with this scene."
+                  checked={settings.useRefAudio}
+                  onChange={(on) => updateSettings({ useRefAudio: on })}
+                />
+                <ToggleCard
+                  title="Generated ambience"
+                  note="When reference audio is off (or missing), H3 can still invent a soundtrack."
+                  checked={settings.videoSound}
+                  onChange={(on) => updateSettings({ videoSound: on })}
+                />
 
-            <div className="scene-section">
-              <div className="label">
-                <span>Segments</span>
-                <span>{segments.length} parts</span>
-              </div>
-              <div className="seglist">
-                {segments.map((seg) => (
-                  <SegmentCard
-                    key={`${editing.id}-${seg.index}-${frameKey}`}
-                    sceneId={editing.id}
-                    seg={seg}
-                    frameKey={frameKey}
-                    disabled={busy}
-                    onSave={(text) => void saveSegment(seg, text)}
-                    onChangeFrame={(which) => changeFrame(seg, which)}
-                  />
-                ))}
-              </div>
-            </div>
+                {err && <div className="err">{err}</div>}
 
-            <div className="scene-section scene-generate">
-              <div className="label">
-                <span>Create video</span>
-                <span>720p · H3</span>
+                <button
+                  type="button"
+                  className="primary go"
+                  disabled={busy || !modelReady || !segments.length}
+                  onClick={() => void generate()}
+                >
+                  <Icon name="wand" />
+                  <span>{modelReady ? "Create video" : "Downloading…"}</span>
+                </button>
+                <p className="hint">
+                  Part 1 starts from the first beat, then extends through each part like Create → Action
+                  {est ? ` · ~${fmtTime(est)} per slice` : ""}.
+                </p>
               </div>
-              <div className="chipwrap length-chips">
-                {LENGTHS.map((l) => (
-                  <button
-                    key={l.seconds}
-                    type="button"
-                    className={settings.videoSeconds === l.seconds ? "on" : ""}
-                    onClick={() => updateSettings({ videoSeconds: l.seconds })}
-                  >
-                    {l.seconds}s · {l.note}
-                  </button>
-                ))}
-              </div>
-
-              <VideoLoraCard
-                modelId="h3"
-                modelLabel={modelLabel}
-                avail={h3Meta.loras || []}
-                max={videoMeta?.maxLoras || 3}
-                onToast={onToast}
-              />
-              <ToggleCard
-                title="Reference audio"
-                note="Uses the soundtrack saved with this scene."
-                checked={settings.useRefAudio}
-                onChange={(on) => updateSettings({ useRefAudio: on })}
-              />
-              <ToggleCard
-                title="Generated ambience"
-                note="When reference audio is off (or missing), H3 can still invent a soundtrack."
-                checked={settings.videoSound}
-                onChange={(on) => updateSettings({ videoSound: on })}
-              />
-
-              {err && <div className="err">{err}</div>}
-
-              <button
-                type="button"
-                className="primary go"
-                disabled={busy || !modelReady || !segments.length}
-                onClick={() => void generate()}
-              >
-                <Icon name="wand" />
-                <span>{modelReady ? "Create video" : "Downloading…"}</span>
-              </button>
-              <p className="hint">
-                Part 1 starts from the first beat, then extends through each part like Create → Action
-                {est ? ` · ~${fmtTime(est)} per slice` : ""}.
-              </p>
-            </div>
-          </>
-        )}
+            </>
+          )}
+        </div>
       </section>
     );
   }
