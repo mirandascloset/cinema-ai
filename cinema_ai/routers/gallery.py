@@ -11,7 +11,7 @@ router = APIRouter(tags=["gallery"])
 
 @router.get("/api/gallery")
 def api_gallery(
-    limit: int | None = Query(None, ge=1, le=500),
+    limit: int | None = Query(None, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     slim: bool = Query(False),
 ):
